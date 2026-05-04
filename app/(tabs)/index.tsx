@@ -106,6 +106,13 @@ export default function HomeScreen() {
           onPress={() => router.push('/(tabs)/quiz')}
         />
         <ActionCard
+          title="Your Profile"
+          subtitle="Career snapshot"
+          icon="person-circle-outline"
+          color="#0EA5E9"
+          onPress={() => router.push('/professional-profile' as never)}
+        />
+        <ActionCard
           title="Upgrade Plan"
           subtitle="Unlock all features"
           icon="flash-outline"

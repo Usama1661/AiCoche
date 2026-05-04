@@ -63,6 +63,10 @@ export default function RootLayout() {
             />
             <Stack.Screen name="cv-analysis" />
             <Stack.Screen
+              name="professional-profile"
+              options={{ presentation: 'card', animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
               name="interview-session"
               options={{ presentation: 'fullScreenModal' }}
             />

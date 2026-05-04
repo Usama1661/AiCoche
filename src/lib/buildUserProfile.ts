@@ -16,5 +16,6 @@ export function buildUserProfileFromStores(): UserProfile {
     skills: p.skills,
     tools: p.tools,
     projects: p.projects,
+    professionalProfile: p.professionalProfile,
   };
 }

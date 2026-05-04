@@ -2,7 +2,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-import type { CareerGoal, ExperienceLevel } from '@/src/types/user';
+import type { CareerGoal, ExperienceLevel, ProfessionalProfile } from '@/src/types/user';
+
+type ProfileActionKey =
+  | 'setOnboardingField'
+  | 'updateProfessionalProfile'
+  | 'replaceProfessionalProfile'
+  | 'completeOnboarding'
+  | 'finishOnboarding'
+  | 'reset'
+  | 'addSkill'
+  | 'removeSkill'
+  | 'addTool'
+  | 'removeTool'
+  | 'addProject'
+  | 'removeProject';
 
 type ProfileState = {
   onboardingComplete: boolean;
@@ -14,7 +28,10 @@ type ProfileState = {
   skills: string[];
   tools: string[];
   projects: string[];
-  setOnboardingField: (patch: Partial<Omit<ProfileState, 'setOnboardingField' | 'reset' | 'completeOnboarding' | 'finishOnboarding' | 'addSkill' | 'removeSkill' | 'addTool' | 'removeTool' | 'addProject' | 'removeProject'>>) => void;
+  professionalProfile: ProfessionalProfile;
+  setOnboardingField: (patch: Partial<Omit<ProfileState, ProfileActionKey>>) => void;
+  updateProfessionalProfile: (patch: Partial<ProfessionalProfile>) => void;
+  replaceProfessionalProfile: (profile: ProfessionalProfile) => void;
   completeOnboarding: () => void;
   /** Single atomic update: avoids race where index reads before `onboardingComplete` is set */
   finishOnboarding: (fields: {
@@ -33,18 +50,24 @@ type ProfileState = {
   removeProject: (s: string) => void;
 };
 
+export const emptyProfessionalProfile: ProfessionalProfile = {
+  fullName: '',
+  headline: '',
+  bio: '',
+  experiences: [],
+  currentCompany: '',
+  currentDesignation: '',
+  employmentStatus: '',
+  technicalSkills: [],
+  softSkills: [],
+  certifications: [],
+  source: null,
+  updatedAt: null,
+};
+
 const initial: Omit<
   ProfileState,
-  | 'setOnboardingField'
-  | 'completeOnboarding'
-  | 'finishOnboarding'
-  | 'reset'
-  | 'addSkill'
-  | 'removeSkill'
-  | 'addTool'
-  | 'removeTool'
-  | 'addProject'
-  | 'removeProject'
+  ProfileActionKey
 > = {
   onboardingComplete: false,
   professionKey: '',
@@ -55,6 +78,7 @@ const initial: Omit<
   skills: [],
   tools: [],
   projects: [],
+  professionalProfile: emptyProfessionalProfile,
 };
 
 export const useProfileStore = create<ProfileState>()(
@@ -62,6 +86,22 @@ export const useProfileStore = create<ProfileState>()(
     (set, get) => ({
       ...initial,
       setOnboardingField: (patch) => set((s) => ({ ...s, ...patch })),
+      updateProfessionalProfile: (patch) =>
+        set((s) => ({
+          professionalProfile: {
+            ...s.professionalProfile,
+            ...patch,
+            updatedAt: new Date().toISOString(),
+          },
+        })),
+      replaceProfessionalProfile: (profile) =>
+        set({
+          professionalProfile: {
+            ...emptyProfessionalProfile,
+            ...profile,
+            updatedAt: new Date().toISOString(),
+          },
+        }),
       completeOnboarding: () => set({ onboardingComplete: true }),
       finishOnboarding: (fields) =>
         set((s) => ({

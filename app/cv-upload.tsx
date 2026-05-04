@@ -7,7 +7,10 @@ import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
 import { Screen } from '@/src/components/ui/Screen';
 import { AppHeader } from '@/src/components/layout/AppHeader';
+import { parseProfessionalProfileFromResume } from '@/src/lib/resumeProfileParser';
 import { useMetricsStore } from '@/src/store/metricsStore';
+import { useProfileStore } from '@/src/store/profileStore';
+import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { spacing } from '@/src/theme/tokens';
 
@@ -23,6 +26,9 @@ export default function CvUploadScreen() {
   const setLastCvText = useMetricsStore((s) => s.setLastCvText);
   const lastCvFileName = useMetricsStore((s) => s.lastCvFileName);
   const lastCvUri = useMetricsStore((s) => s.lastCvUri);
+  const displayName = useSessionStore((s) => s.displayName);
+  const professionLabel = useProfileStore((s) => s.professionLabel);
+  const replaceProfessionalProfile = useProfileStore((s) => s.replaceProfessionalProfile);
 
   async function pick() {
     const res = await DocumentPicker.getDocumentAsync({
@@ -34,6 +40,14 @@ export default function CvUploadScreen() {
     if (!file?.name) return;
     setLastCv(file.name, file.uri ?? null);
     setLastCvText(PLACEHOLDER_CV_TEXT);
+    replaceProfessionalProfile(
+      parseProfessionalProfileFromResume({
+        resumeText: PLACEHOLDER_CV_TEXT,
+        fileName: file.name,
+        displayName,
+        fallbackHeadline: professionLabel,
+      })
+    );
   }
 
   function analyze() {
