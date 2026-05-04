@@ -1,0 +1,9 @@
+# https://supabase.com/docs/guides/cli/config
+# Local project id is filled when you run `supabase link`
+
+[api]
+enabled = true
+
+[functions]
+# App uses custom auth (Zustand), not Supabase Auth JWT — allow invocation with anon key.
+verify_jwt = false
