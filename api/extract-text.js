@@ -86,13 +86,27 @@ function extractPdfStreamText(buffer) {
 
   while ((match = streamPattern.exec(raw))) {
     const start = Buffer.byteLength(raw.slice(0, match.index), 'latin1') + match[0].indexOf(match[1]);
-    const streamBuffer = buffer.subarray(start, start + Buffer.byteLength(match[1], 'latin1'));
+    const streamBuffer = trimPdfStreamBuffer(
+      buffer.subarray(start, start + Buffer.byteLength(match[1], 'latin1'))
+    );
     const candidates = [streamBuffer];
 
     try {
       candidates.push(zlib.inflateSync(streamBuffer));
     } catch {
       // Some streams are not Flate-compressed; plain parsing still helps.
+    }
+
+    try {
+      const ascii85 = ascii85Decode(streamBuffer.toString('latin1'));
+      candidates.push(ascii85);
+      try {
+        candidates.push(zlib.inflateSync(ascii85));
+      } catch {
+        // ASCII85 streams are not always additionally compressed.
+      }
+    } catch {
+      // Not an ASCII85 stream.
     }
 
     for (const candidate of candidates) {
@@ -103,6 +117,58 @@ function extractPdfStreamText(buffer) {
   }
 
   return chunks;
+}
+
+function trimPdfStreamBuffer(buffer) {
+  let start = 0;
+  let end = buffer.length;
+
+  while (start < end && (buffer[start] === 0x0a || buffer[start] === 0x0d || buffer[start] === 0x20)) {
+    start += 1;
+  }
+  while (end > start && (buffer[end - 1] === 0x0a || buffer[end - 1] === 0x0d || buffer[end - 1] === 0x20)) {
+    end -= 1;
+  }
+
+  return buffer.subarray(start, end);
+}
+
+function ascii85Decode(input) {
+  const clean = input
+    .replace(/^<~/, '')
+    .replace(/~>$/, '')
+    .replace(/\s+/g, '');
+  const out = [];
+  let group = [];
+
+  for (const char of clean) {
+    if (char === 'z' && group.length === 0) {
+      out.push(0, 0, 0, 0);
+      continue;
+    }
+
+    const code = char.charCodeAt(0);
+    if (code < 33 || code > 117) continue;
+    group.push(code - 33);
+
+    if (group.length === 5) {
+      let value = 0;
+      for (const item of group) value = value * 85 + item;
+      out.push((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255);
+      group = [];
+    }
+  }
+
+  if (group.length) {
+    const missing = 5 - group.length;
+    for (let index = 0; index < missing; index += 1) group.push(84);
+    let value = 0;
+    for (const item of group) value = value * 85 + item;
+    const bytes = [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255];
+    out.push(...bytes.slice(0, 4 - missing));
+  }
+
+  return Buffer.from(out);
 }
 
 function extractArrayText(content) {
