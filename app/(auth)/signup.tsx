@@ -17,7 +17,6 @@ function isValidEmail(e: string) {
 
 export default function SignupScreen() {
   const router = useRouter();
-  const login = useSessionStore((s) => s.login);
   const { colors } = useAppTheme();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -25,12 +24,14 @@ export default function SignupScreen() {
   const [secure, setSecure] = useState(true);
   const [emailErr, setEmailErr] = useState('');
   const [pwErr, setPwErr] = useState('');
+  const [loading, setLoading] = useState(false);
+  const signup = useSessionStore((s) => s.signup);
 
   const canSubmit = useMemo(() => {
     return isValidEmail(email) && password.length >= 6;
   }, [email, password]);
 
-  function onSubmit() {
+  async function onSubmit() {
     setEmailErr('');
     setPwErr('');
     if (!isValidEmail(email)) {
@@ -41,8 +42,23 @@ export default function SignupScreen() {
       setPwErr('At least 6 characters');
       return;
     }
-    login(email.trim(), password, name.trim() || undefined);
-    router.replace('/');
+    try {
+      setLoading(true);
+      const result = await signup(email.trim(), password, name.trim() || undefined);
+      if (result.needsEmailConfirmation) {
+        Alert.alert(
+          'Check your email',
+          'Your account was created. Confirm your email, then sign in.'
+        );
+        router.replace('/(auth)/login');
+        return;
+      }
+      router.replace('/');
+    } catch (error) {
+      Alert.alert('Sign up failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -91,7 +107,8 @@ export default function SignupScreen() {
       <Button
         title="Create account"
         onPress={onSubmit}
-        disabled={!canSubmit}
+        disabled={!canSubmit || loading}
+        loading={loading}
         style={styles.mainButton}
         leftIcon={<Ionicons name="arrow-forward-outline" size={22} color="#FFFFFF" />}
       />

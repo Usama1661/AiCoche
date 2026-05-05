@@ -1,7 +1,9 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
-import { chatCompletionJson } from '../_shared/openai.ts';
+import { analyzeCvWithAi } from '../_shared/ai.ts';
+import { saveAnalysisAndAutofill } from '../_shared/profile.ts';
+import { isResponse, readJson, requireAuth } from '../_shared/supabase.ts';
 
 type UserProfile = {
   professionLabel?: string;
@@ -12,30 +14,11 @@ type UserProfile = {
 };
 
 type AnalyzeBody = {
-  cvText: string;
-  userProfile: UserProfile;
+  cvDocumentId?: string;
+  cvText?: string;
+  userProfile?: UserProfile;
+  targetRole?: string;
 };
-
-function fallbackAnalysis(profile: UserProfile, cvText: string) {
-  const role = profile.professionLabel ?? 'professional';
-  return {
-    strengths: [
-      `Positioning as a ${role}`,
-      cvText.length > 200 ? 'Substantive content to refine' : 'Compact profile to build on',
-    ],
-    weaknesses: [
-      'Add more quantified outcomes (%, $, time saved).',
-      'Tighten alignment between skills and target role.',
-    ],
-    missingSkills: ['Role-specific keywords', 'Impact metrics', 'Tooling evidence'],
-    suggestions: [
-      'Use 2–3 achievement bullets per role with metrics.',
-      'Mirror phrasing from job descriptions in your field.',
-      'Keep to one page unless you are very senior.',
-    ],
-    overallScore: 72,
-  };
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -47,59 +30,77 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const body = (await req.json()) as AnalyzeBody;
-    const cvText = (body.cvText ?? '').trim();
+    const { supabase, user } = await requireAuth(req);
+    const body = await readJson<AnalyzeBody>(req);
+    let cvText = (body.cvText ?? '').trim();
+    let cvDocumentId = body.cvDocumentId ?? null;
     const userProfile = body.userProfile ?? {};
 
-    if (!cvText) {
-      return jsonResponse({ error: 'cvText is required' }, 400);
+    if (cvDocumentId) {
+      const { data: doc, error } = await supabase
+        .from('cv_documents')
+        .select('id, extracted_text, user_id')
+        .eq('id', cvDocumentId)
+        .eq('user_id', user.id)
+        .single();
+
+      if (error || !doc) return jsonResponse({ error: 'CV document not found' }, 404);
+      cvText = (doc.extracted_text ?? cvText).trim();
     }
 
-    const system = `You are a career coach. Respond ONLY with valid JSON (no markdown) with this exact shape:
-{
-  "strengths": string[],
-  "weaknesses": string[],
-  "missingSkills": string[],
-  "suggestions": string[],
-  "overallScore": number
-}
-Rules: 3-5 items per array where appropriate. overallScore is 0-100. Tailor to the user's profession and language.`;
+    if (!cvText) {
+      return jsonResponse({ error: 'cvText or a cvDocumentId with extracted_text is required' }, 400);
+    }
 
-    const user = `User profession context: ${JSON.stringify(userProfile)}
-
-CV text:
----
-${cvText.slice(0, 24_000)}
----`;
-
-    const raw = await chatCompletionJson(
-      [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      { temperature: 0.3 }
+    const analysis = await analyzeCvWithAi(
+      cvText,
+      body.targetRole ?? userProfile.professionLabel
     );
 
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const result = {
-          strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
-          weaknesses: Array.isArray(parsed.weaknesses) ? parsed.weaknesses : [],
-          missingSkills: Array.isArray(parsed.missingSkills) ? parsed.missingSkills : [],
-          suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-          overallScore:
-            typeof parsed.overallScore === 'number' ? parsed.overallScore : 70,
-        };
-        return jsonResponse(result);
-      } catch {
-        // fall through
-      }
+    let saved = null;
+    if (!cvDocumentId) {
+      const { data: doc, error } = await supabase
+        .from('cv_documents')
+        .insert({
+          user_id: user.id,
+          file_name: 'manual-cv-text.txt',
+          file_type: 'text/plain',
+          file_size: cvText.length,
+          storage_path: `${user.id}/manual-${crypto.randomUUID()}.txt`,
+          extracted_text: cvText,
+          status: 'processing',
+        })
+        .select('id')
+        .single();
+      if (error) throw error;
+      cvDocumentId = doc.id;
     }
 
-    return jsonResponse(fallbackAnalysis(userProfile, cvText));
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Server error';
+    saved = await saveAnalysisAndAutofill({
+      supabase,
+      userId: user.id,
+      cvDocumentId,
+      analysis,
+    });
+
+    await supabase
+      .from('cv_documents')
+      .update({ status: 'analyzed', extracted_text: cvText, error_message: null })
+      .eq('id', cvDocumentId)
+      .eq('user_id', user.id);
+
+    return jsonResponse({
+      ...analysis,
+      missingSkills: analysis.recommendedSkills,
+      suggestions: analysis.improvementSuggestions,
+      overallScore: analysis.cvScore,
+      cvDocumentId,
+      analysisResultId: saved.id,
+    });
+  } catch (error) {
+    if (isResponse(error)) return error;
+    const message = error instanceof Error ? error.message : 'Server error';
+    console.error(error);
     return jsonResponse({ error: message }, 500);
   }
 });

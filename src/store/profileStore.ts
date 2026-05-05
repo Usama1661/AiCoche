@@ -2,6 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import {
+  loadProfileSnapshot,
+  saveProfileSnapshot,
+  type ProfileSnapshot,
+} from '@/src/lib/profilePersistence';
 import type { CareerGoal, ExperienceLevel, ProfessionalProfile } from '@/src/types/user';
 
 type ProfileActionKey =
@@ -16,9 +21,12 @@ type ProfileActionKey =
   | 'addTool'
   | 'removeTool'
   | 'addProject'
-  | 'removeProject';
+  | 'removeProject'
+  | 'loadRemoteProfile';
 
-type ProfileState = {
+export type { ProfileSnapshot };
+
+type ProfileState = ProfileSnapshot & {
   onboardingComplete: boolean;
   professionKey: string;
   professionLabel: string;
@@ -48,6 +56,7 @@ type ProfileState = {
   removeTool: (s: string) => void;
   addProject: (s: string) => void;
   removeProject: (s: string) => void;
+  loadRemoteProfile: () => Promise<void>;
 };
 
 export const emptyProfessionalProfile: ProfessionalProfile = {
@@ -81,34 +90,67 @@ const initial: Omit<
   professionalProfile: emptyProfessionalProfile,
 };
 
+function selectSnapshot(state: ProfileState): ProfileSnapshot {
+  return {
+    onboardingComplete: state.onboardingComplete,
+    professionKey: state.professionKey,
+    professionLabel: state.professionLabel,
+    experience: state.experience,
+    goal: state.goal,
+    language: state.language,
+    skills: state.skills,
+    tools: state.tools,
+    projects: state.projects,
+    professionalProfile: state.professionalProfile,
+  };
+}
+
+function persistSnapshot(state: ProfileState) {
+  void saveProfileSnapshot(selectSnapshot(state)).catch((error) => {
+    console.warn('Failed to sync profile to Supabase', error);
+  });
+}
+
 export const useProfileStore = create<ProfileState>()(
   persist(
     (set, get) => ({
       ...initial,
-      setOnboardingField: (patch) => set((s) => ({ ...s, ...patch })),
-      updateProfessionalProfile: (patch) =>
+      setOnboardingField: (patch) => {
+        set((s) => ({ ...s, ...patch }));
+        persistSnapshot(get());
+      },
+      updateProfessionalProfile: (patch) => {
         set((s) => ({
           professionalProfile: {
             ...s.professionalProfile,
             ...patch,
             updatedAt: new Date().toISOString(),
           },
-        })),
-      replaceProfessionalProfile: (profile) =>
+        }));
+        persistSnapshot(get());
+      },
+      replaceProfessionalProfile: (profile) => {
         set({
           professionalProfile: {
             ...emptyProfessionalProfile,
             ...profile,
             updatedAt: new Date().toISOString(),
           },
-        }),
-      completeOnboarding: () => set({ onboardingComplete: true }),
-      finishOnboarding: (fields) =>
+        });
+        persistSnapshot(get());
+      },
+      completeOnboarding: () => {
+        set({ onboardingComplete: true });
+        persistSnapshot(get());
+      },
+      finishOnboarding: (fields) => {
         set((s) => ({
           ...s,
           ...fields,
           onboardingComplete: true,
-        })),
+        }));
+        persistSnapshot(get());
+      },
       reset: () => set({ ...initial }),
       addSkill: (s) => {
         const t = s.trim();
@@ -116,25 +158,40 @@ export const useProfileStore = create<ProfileState>()(
         const arr = get().skills;
         if (arr.includes(t)) return;
         set({ skills: [...arr, t] });
+        persistSnapshot(get());
       },
-      removeSkill: (s) => set({ skills: get().skills.filter((x) => x !== s) }),
+      removeSkill: (s) => {
+        set({ skills: get().skills.filter((x) => x !== s) });
+        persistSnapshot(get());
+      },
       addTool: (s) => {
         const t = s.trim();
         if (!t) return;
         const arr = get().tools;
         if (arr.includes(t)) return;
         set({ tools: [...arr, t] });
+        persistSnapshot(get());
       },
-      removeTool: (s) => set({ tools: get().tools.filter((x) => x !== s) }),
+      removeTool: (s) => {
+        set({ tools: get().tools.filter((x) => x !== s) });
+        persistSnapshot(get());
+      },
       addProject: (s) => {
         const t = s.trim();
         if (!t) return;
         const arr = get().projects;
         if (arr.includes(t)) return;
         set({ projects: [...arr, t] });
+        persistSnapshot(get());
       },
-      removeProject: (s) =>
-        set({ projects: get().projects.filter((x) => x !== s) }),
+      removeProject: (s) => {
+        set({ projects: get().projects.filter((x) => x !== s) });
+        persistSnapshot(get());
+      },
+      loadRemoteProfile: async () => {
+        const remote = await loadProfileSnapshot();
+        set(remote ?? { ...initial });
+      },
     }),
     { name: 'aicoche-profile', storage: createJSONStorage(() => AsyncStorage) }
   )

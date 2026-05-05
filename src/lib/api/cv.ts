@@ -1,5 +1,6 @@
 import type { CvAnalysis } from '@/src/types/cv';
 import type { UserProfile } from '@/src/types/user';
+import { AUTHENTICATION_ENABLED } from '@/src/lib/auth';
 import { hasSupabaseConfig, supabase } from '@/src/lib/supabase';
 
 export type AnalyzeCvInput = {
@@ -33,6 +34,11 @@ export async function analyzeCv(input: AnalyzeCvInput): Promise<CvAnalysis> {
     cvText: input.cvText,
     userProfile: input.profile,
   };
+
+  if (!AUTHENTICATION_ENABLED) {
+    await new Promise((r) => setTimeout(r, 900));
+    return mockAnalysis(input.profile);
+  }
 
   if (!hasSupabaseConfig()) {
     if (__DEV__) {

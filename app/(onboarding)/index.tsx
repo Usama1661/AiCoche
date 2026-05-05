@@ -11,7 +11,6 @@ import type { CareerGoal, ExperienceLevel } from '@/src/types/user';
 import type { Profession } from '@/src/lib/professions';
 import { searchProfessions } from '@/src/lib/professions';
 import { useProfileStore } from '@/src/store/profileStore';
-import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { spacing } from '@/src/theme/tokens';
 
@@ -42,7 +41,6 @@ export default function OnboardingScreen() {
   const [otherLang, setOtherLang] = useState('');
 
   const finishOnboarding = useProfileStore((s) => s.finishOnboarding);
-  const logout = useSessionStore((s) => s.logout);
   const professions = useMemo(() => searchProfessions(query), [query]);
 
   function next() {
@@ -68,8 +66,7 @@ export default function OnboardingScreen() {
 
   function back() {
     if (step === 0) {
-      logout();
-      router.replace('/(auth)/login');
+      router.replace('/');
       return;
     }
     setStep((s) => s - 1);

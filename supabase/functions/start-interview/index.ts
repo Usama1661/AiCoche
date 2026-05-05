@@ -1,9 +1,8 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
-
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { chatCompletionJson } from '../_shared/openai.ts';
+import { isResponse, requireAuth } from '../_shared/supabase.ts';
 
 type UserProfile = Record<string, unknown>;
 
@@ -15,11 +14,8 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Method not allowed' }, 405);
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const supabase = createClient(supabaseUrl, serviceKey);
-
   try {
+    const { supabase, user } = await requireAuth(req);
     const { profile } = (await req.json()) as { profile: UserProfile };
     if (!profile || typeof profile !== 'object') {
       return jsonResponse({ error: 'profile is required' }, 400);
@@ -58,6 +54,7 @@ ${JSON.stringify(profile)}`;
     const { data, error } = await supabase
       .from('interview_sessions')
       .insert({
+        user_id: user.id,
         profile: profile as Record<string, unknown>,
         messages: [{ role: 'assistant', content: question }],
         turn_count: 0,
@@ -69,6 +66,7 @@ ${JSON.stringify(profile)}`;
 
     return jsonResponse({ sessionId: data.id, question });
   } catch (e) {
+    if (isResponse(e)) return e;
     const message = e instanceof Error ? e.message : 'Server error';
     console.error(e);
     return jsonResponse({ error: message }, 500);

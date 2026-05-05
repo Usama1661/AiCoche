@@ -76,27 +76,27 @@ export default function ProfileScreen() {
     setModal(null);
   }
 
+  async function signOut() {
+    try {
+      await logout();
+      router.replace('/(auth)/login');
+    } catch (error) {
+      Alert.alert('Sign out failed', error instanceof Error ? error.message : 'Please try again.');
+    }
+  }
+
+  function confirmSignOut() {
+    Alert.alert('Sign out?', '', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: signOut },
+    ]);
+  }
+
   return (
     <Screen scroll>
       <View style={styles.topRow}>
         <AppText variant="display">Profile</AppText>
-        <Pressable
-          hitSlop={12}
-          onPress={() => {
-            Alert.alert('Sign out?', '', [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Sign out',
-                style: 'destructive',
-                onPress: () => {
-                  logout();
-                  router.replace('/(auth)/login');
-                },
-              },
-            ]);
-          }}>
-          <Ionicons name="log-out-outline" size={30} color={colors.textMuted} />
-        </Pressable>
+        <Button title="Sign out" variant="ghost" onPress={confirmSignOut} />
       </View>
 
       <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -170,25 +170,6 @@ export default function ProfileScreen() {
         <UsageRow icon="document-text-outline" label="CV Analyses" value={`${cvAnalysesUsed}/${FREE_CV_LIMIT}`} />
         <UsageRow icon="chatbubble-outline" label="Interviews" value={`${chatsUsed}/${FREE_CHAT_LIMIT}`} />
       </View>
-
-      <Button
-        title="Sign out"
-        variant="danger"
-        onPress={() => {
-          Alert.alert('Sign out?', '', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Sign out',
-              style: 'destructive',
-              onPress: () => {
-                logout();
-                router.replace('/(auth)/login');
-              },
-            },
-          ]);
-        }}
-        style={{ marginTop: spacing.xl, display: 'none' }}
-      />
 
       <Modal visible={modal != null} transparent animationType="fade">
         <Pressable style={styles.modalBackdrop} onPress={() => setModal(null)}>

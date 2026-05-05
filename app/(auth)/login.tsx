@@ -24,12 +24,13 @@ export default function LoginScreen() {
   const [secure, setSecure] = useState(true);
   const [emailErr, setEmailErr] = useState('');
   const [pwErr, setPwErr] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const canSubmit = useMemo(() => {
     return isValidEmail(email) && password.length >= 6;
   }, [email, password]);
 
-  function onSubmit() {
+  async function onSubmit() {
     setEmailErr('');
     setPwErr('');
     if (!isValidEmail(email)) {
@@ -40,8 +41,15 @@ export default function LoginScreen() {
       setPwErr('At least 6 characters');
       return;
     }
-    login(email.trim(), password);
-    router.replace('/');
+    try {
+      setLoading(true);
+      await login(email.trim(), password);
+      router.replace('/');
+    } catch (error) {
+      Alert.alert('Sign in failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -83,7 +91,8 @@ export default function LoginScreen() {
       <Button
         title="Sign in"
         onPress={onSubmit}
-        disabled={!canSubmit}
+        disabled={!canSubmit || loading}
+        loading={loading}
         style={styles.mainButton}
         leftIcon={<Ionicons name="arrow-forward-outline" size={22} color="#FFFFFF" />}
       />

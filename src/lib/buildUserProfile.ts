@@ -3,9 +3,10 @@ import { useSessionStore } from '@/src/store/sessionStore';
 import type { CareerGoal, ExperienceLevel, UserProfile } from '@/src/types/user';
 
 export function buildUserProfileFromStores(): UserProfile {
-  const { email, displayName } = useSessionStore.getState();
+  const { userId, email, displayName } = useSessionStore.getState();
   const p = useProfileStore.getState();
   return {
+    id: userId || undefined,
     email,
     displayName,
     professionKey: p.professionKey,

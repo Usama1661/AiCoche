@@ -1,9 +1,8 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
-
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { chatCompletionJson } from '../_shared/openai.ts';
+import { isResponse, requireAuth } from '../_shared/supabase.ts';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -17,11 +16,8 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Method not allowed' }, 405);
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const supabase = createClient(supabaseUrl, serviceKey);
-
   try {
+    const { supabase, user } = await requireAuth(req);
     const { sessionId, answer } = (await req.json()) as {
       sessionId: string;
       answer: string;
@@ -35,6 +31,7 @@ Deno.serve(async (req) => {
       .from('interview_sessions')
       .select('id, profile, messages, turn_count')
       .eq('id', sessionId)
+      .eq('user_id', user.id)
       .single();
 
     if (fetchErr || !row) {
@@ -136,7 +133,8 @@ Give feedback, score, and next question.`;
         turn_count: turn,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', sessionId);
+      .eq('id', sessionId)
+      .eq('user_id', user.id);
 
     if (upErr) throw upErr;
 
@@ -147,6 +145,7 @@ Give feedback, score, and next question.`;
       finished,
     });
   } catch (e) {
+    if (isResponse(e)) return e;
     const message = e instanceof Error ? e.message : 'Server error';
     console.error(e);
     return jsonResponse({ error: message }, 500);

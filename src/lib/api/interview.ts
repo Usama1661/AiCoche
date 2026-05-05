@@ -3,6 +3,7 @@ import type {
   StartInterviewResponse,
 } from '@/src/types/interview';
 import type { UserProfile } from '@/src/types/user';
+import { AUTHENTICATION_ENABLED } from '@/src/lib/auth';
 import { hasSupabaseConfig, supabase } from '@/src/lib/supabase';
 
 let mockCounter = 0;
@@ -34,6 +35,11 @@ function mockContinue(_answer: string): ContinueInterviewResponse {
 }
 
 export async function startInterview(profile: UserProfile): Promise<StartInterviewResponse> {
+  if (!AUTHENTICATION_ENABLED) {
+    await new Promise((r) => setTimeout(r, 700));
+    return mockStart(profile);
+  }
+
   if (!hasSupabaseConfig()) {
     if (__DEV__) {
       await new Promise((r) => setTimeout(r, 700));
@@ -55,6 +61,11 @@ export async function continueInterview(params: {
   sessionId: string;
   answer: string;
 }): Promise<ContinueInterviewResponse> {
+  if (!AUTHENTICATION_ENABLED) {
+    await new Promise((r) => setTimeout(r, 800));
+    return mockContinue(params.answer);
+  }
+
   if (!hasSupabaseConfig()) {
     if (__DEV__) {
       await new Promise((r) => setTimeout(r, 800));
