@@ -1,4 +1,5 @@
 const fs = require('fs/promises');
+const zlib = require('zlib');
 const { formidable } = require('formidable');
 const mammoth = require('mammoth');
 const pdfParse = require('pdf-parse');
@@ -53,6 +54,19 @@ function decodePdfString(value) {
 
 function fallbackPdfText(buffer) {
   const raw = buffer.toString('latin1');
+  const chunks = extractPdfTextOperators(raw);
+  chunks.push(...extractPdfStreamText(buffer));
+
+  return chunks
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .join('\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function extractPdfTextOperators(raw) {
   const chunks = [];
   const stringPattern = /\(([^()]{2,500})\)\s*(?:Tj|'|"|TJ)/g;
   let match;
@@ -61,17 +75,63 @@ function fallbackPdfText(buffer) {
     chunks.push(decodePdfString(match[1]));
   }
 
-  if (!chunks.length) {
-    const readable = raw
-      .replace(/\\[0-7]{3}/g, ' ')
-      .replace(/[^\x20-\x7E\n\r]+/g, ' ')
-      .split(/\s{2,}|[\r\n]+/)
-      .map((part) => part.trim())
-      .filter((part) => /[a-zA-Z]{3,}/.test(part) && !/^(obj|endobj|stream|endstream|xref|trailer)$/i.test(part));
-    chunks.push(...readable);
+  return chunks;
+}
+
+function extractPdfStreamText(buffer) {
+  const raw = buffer.toString('latin1');
+  const chunks = [];
+  const streamPattern = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  let match;
+
+  while ((match = streamPattern.exec(raw))) {
+    const start = Buffer.byteLength(raw.slice(0, match.index), 'latin1') + match[0].indexOf(match[1]);
+    const streamBuffer = buffer.subarray(start, start + Buffer.byteLength(match[1], 'latin1'));
+    const candidates = [streamBuffer];
+
+    try {
+      candidates.push(zlib.inflateSync(streamBuffer));
+    } catch {
+      // Some streams are not Flate-compressed; plain parsing still helps.
+    }
+
+    for (const candidate of candidates) {
+      const content = candidate.toString('latin1');
+      chunks.push(...extractPdfTextOperators(content));
+      chunks.push(...extractArrayText(content));
+    }
   }
 
-  return chunks.join('\n').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return chunks;
+}
+
+function extractArrayText(content) {
+  const chunks = [];
+  const arrayPattern = /\[((?:\s*(?:\([^)]*\)|<[^>]+>|-?\d+(?:\.\d+)?)\s*)+)\]\s*TJ/g;
+  let match;
+
+  while ((match = arrayPattern.exec(content))) {
+    const parts = [];
+    const stringPattern = /\(([^()]*)\)|<([0-9A-Fa-f\s]+)>/g;
+    let partMatch;
+
+    while ((partMatch = stringPattern.exec(match[1]))) {
+      if (partMatch[1]) {
+        parts.push(decodePdfString(partMatch[1]));
+      } else if (partMatch[2]) {
+        const hex = partMatch[2].replace(/\s+/g, '');
+        try {
+          parts.push(Buffer.from(hex, 'hex').toString('utf8').replace(/\0/g, ''));
+        } catch {
+          // Ignore malformed hex fragments.
+        }
+      }
+    }
+
+    if (parts.length) chunks.push(parts.join(''));
+  }
+
+  return chunks;
 }
 
 function firstFile(fileValue) {

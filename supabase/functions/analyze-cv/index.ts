@@ -21,6 +21,15 @@ type AnalyzeBody = {
   targetRole?: string;
 };
 
+function looksLikePdfInternals(text: string) {
+  const sample = text.slice(0, 1200);
+  return (
+    sample.includes('%PDF-') ||
+    /\/Type\s*\/(?:Page|Catalog|Font)/.test(sample) ||
+    /(?:\d+\s+\d+\s+obj|endobj|xref|trailer)/.test(sample)
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -47,6 +56,9 @@ Deno.serve(async (req) => {
 
       if (error || !doc) return jsonResponse({ error: 'CV document not found' }, 404);
       cvText = (doc.extracted_text ?? cvText).trim();
+      if (looksLikePdfInternals(cvText)) {
+        cvText = '';
+      }
 
       if (!cvText) {
         const { data: fileBlob, error: downloadError } = await supabase.storage

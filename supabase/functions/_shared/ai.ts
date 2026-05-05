@@ -76,6 +76,15 @@ function lines(value: string) {
 }
 
 function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysis {
+  if (cvText.includes('%PDF-') || /\/Type\s*\/(?:Page|Catalog|Font)/.test(cvText.slice(0, 1200))) {
+    return {
+      ...emptyAnalysis,
+      weaknesses: ['CV text could not be extracted cleanly from the PDF.'],
+      improvementSuggestions: ['Upload a text-based PDF or DOCX so profile sections can be parsed accurately.'],
+      recommendedSkills: targetRole ? [`Skills aligned with ${targetRole}`] : ['Target-role keywords'],
+    };
+  }
+
   const allLines = lines(cvText);
   const email = cvText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? '';
   const phone = cvText.match(/(?:\+?\d[\d\s().-]{7,}\d)/)?.[0]?.trim() ?? '';
