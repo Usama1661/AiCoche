@@ -30,18 +30,48 @@ function parseMultipart(req) {
 }
 
 async function extractPdf(buffer) {
-  if (pdfParse.PDFParse) {
-    const parser = new pdfParse.PDFParse({ data: buffer });
-    try {
-      const result = await parser.getText();
-      return result.text || '';
-    } finally {
-      await parser.destroy();
-    }
+  try {
+    const result = await pdfParse(buffer);
+    const text = result.text || '';
+    if (text.trim().length > 20) return text;
+  } catch (error) {
+    console.warn('pdf-parse failed, using fallback extraction', error);
   }
 
-  const result = await pdfParse(buffer);
-  return result.text || '';
+  return fallbackPdfText(buffer);
+}
+
+function decodePdfString(value) {
+  return value
+    .replace(/\\\\/g, '\\')
+    .replace(/\\\(/g, '(')
+    .replace(/\\\)/g, ')')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\t/g, ' ');
+}
+
+function fallbackPdfText(buffer) {
+  const raw = buffer.toString('latin1');
+  const chunks = [];
+  const stringPattern = /\(([^()]{2,500})\)\s*(?:Tj|'|"|TJ)/g;
+  let match;
+
+  while ((match = stringPattern.exec(raw))) {
+    chunks.push(decodePdfString(match[1]));
+  }
+
+  if (!chunks.length) {
+    const readable = raw
+      .replace(/\\[0-7]{3}/g, ' ')
+      .replace(/[^\x20-\x7E\n\r]+/g, ' ')
+      .split(/\s{2,}|[\r\n]+/)
+      .map((part) => part.trim())
+      .filter((part) => /[a-zA-Z]{3,}/.test(part) && !/^(obj|endobj|stream|endstream|xref|trailer)$/i.test(part));
+    chunks.push(...readable);
+  }
+
+  return chunks.join('\n').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function firstFile(fileValue) {
