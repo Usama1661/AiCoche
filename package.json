@@ -26,7 +26,7 @@
     "expo-web-browser": "~15.0.10",
     "formidable": "^3.5.4",
     "mammoth": "^1.12.0",
-    "pdf-parse": "^2.4.5",
+    "pdf-parse": "^1.1.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
