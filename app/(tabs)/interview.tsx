@@ -1,9 +1,10 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { AppText } from '@/src/components/ui/AppText';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { Screen } from '@/src/components/ui/Screen';
 import { useMetricsStore } from '@/src/store/metricsStore';
 import { useProfileStore } from '@/src/store/profileStore';

@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Alert, StyleSheet, Switch, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 
 import { AppText } from '@/src/components/ui/AppText';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { Screen } from '@/src/components/ui/Screen';
+import { triggerLightHaptic } from '@/src/lib/haptics';
 import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { radii, spacing } from '@/src/theme/tokens';
@@ -64,14 +66,20 @@ export default function SettingsScreen() {
           label="Notifications"
           color={colors.info}
           value={notificationsEnabled}
-          onValueChange={setNotificationsEnabled}
+          onValueChange={(value) => {
+            triggerLightHaptic();
+            setNotificationsEnabled(value);
+          }}
         />
         <SettingsRow
           icon="color-palette-outline"
           label="Appearance"
           color={colors.primary}
           value={isDark}
-          onValueChange={(enabled) => setPreference(enabled ? 'dark' : 'light')}
+          onValueChange={(enabled) => {
+            triggerLightHaptic();
+            setPreference(enabled ? 'dark' : 'light');
+          }}
         />
         <SettingsRow
           icon="calendar-outline"

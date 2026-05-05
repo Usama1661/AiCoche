@@ -1,12 +1,13 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
 import { Screen } from '@/src/components/ui/Screen';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { AppHeader } from '@/src/components/layout/AppHeader';
 import { ErrorBanner } from '@/src/components/ui/ErrorBanner';
 import { uploadCv } from '@/src/lib/api/cv';

@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react';
 import {
-  Pressable,
   StyleSheet,
   View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { cardShadow, radii, spacing } from '@/src/theme/tokens';
 

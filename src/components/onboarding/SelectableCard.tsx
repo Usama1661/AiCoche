@@ -1,6 +1,7 @@
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { Card } from '@/src/components/ui/Card';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { spacing } from '@/src/theme/tokens';

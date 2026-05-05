@@ -1,7 +1,8 @@
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Modal, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { radii, spacing } from '@/src/theme/tokens';
 import { useUsageStore } from '@/src/store/usageStore';

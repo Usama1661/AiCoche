@@ -3,7 +3,6 @@ import {
   Alert,
   Image,
   Modal,
-  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -14,6 +13,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { Screen } from '@/src/components/ui/Screen';
 import { uploadProfileAvatar } from '@/src/lib/profilePersistence';
 import { useAppTheme } from '@/src/theme/ThemeProvider';

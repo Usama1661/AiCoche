@@ -1,16 +1,17 @@
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Platform,
   StyleSheet,
   TextInput,
   View,
-  Pressable,
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
+import { triggerLightHaptic } from '@/src/lib/haptics';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { radii, spacing } from '@/src/theme/tokens';
 
@@ -37,6 +38,12 @@ export function FormInput({
 }: Props) {
   const { colors } = useAppTheme();
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<TextInput>(null);
+
+  function focusInput() {
+    triggerLightHaptic();
+    inputRef.current?.focus();
+  }
 
   return (
     <View style={[styles.wrap, containerStyle]}>
@@ -45,7 +52,9 @@ export function FormInput({
           {label}
         </AppText>
       ) : null}
-      <View
+      <Pressable
+        haptic={false}
+        onPress={focusInput}
         style={[
           styles.inputShell,
           {
@@ -58,6 +67,7 @@ export function FormInput({
         ]}>
         {leftIcon ? <View style={styles.iconSlot}>{leftIcon}</View> : null}
         <TextInput
+          ref={inputRef}
           placeholderTextColor={colors.textSecondary}
           selectionColor={colors.primary}
           {...rest}
@@ -76,7 +86,7 @@ export function FormInput({
             {rightIcon}
           </Pressable>
         ) : null}
-      </View>
+      </Pressable>
       {error ? (
         <AppText variant="caption" style={{ color: colors.error }}>
           {error}

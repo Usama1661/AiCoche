@@ -2,13 +2,13 @@ import type { ReactNode } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   View,
   type ViewStyle,
 } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { motion, radii, spacing } from '@/src/theme/tokens';
 

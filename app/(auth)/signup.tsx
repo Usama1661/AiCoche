@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
 import { FormInput } from '@/src/components/ui/FormInput';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { Screen } from '@/src/components/ui/Screen';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { useSessionStore } from '@/src/store/sessionStore';

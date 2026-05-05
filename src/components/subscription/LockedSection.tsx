@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 import { BlurView } from 'expo-blur';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { radii, spacing } from '@/src/theme/tokens';
 

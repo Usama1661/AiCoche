@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import {
   FlatList,
   Modal,
-  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -10,6 +9,7 @@ import {
 
 import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
+import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { searchProfessions, type Profession } from '@/src/lib/professions';
 import { radii, spacing } from '@/src/theme/tokens';
