@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -8,13 +8,11 @@ import { AppHeader } from '@/src/components/layout/AppHeader';
 import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
 import { Screen } from '@/src/components/ui/Screen';
-import { parseProfessionalProfileFromResume } from '@/src/lib/resumeProfileParser';
-import { useMetricsStore } from '@/src/store/metricsStore';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { spacing } from '@/src/theme/tokens';
-import type { Certification, ProfessionalExperience, ProfessionalProfile } from '@/src/types/user';
+import type { Certification, ProfessionalEducation, ProfessionalExperience, ProfessionalProfile } from '@/src/types/user';
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -33,6 +31,21 @@ function textToList(value: string) {
         .filter(Boolean)
     )
   );
+}
+
+function usefulProfession(value: string) {
+  return /ai career coach app/i.test(value) ? '' : value;
+}
+
+function usefulName(value: string) {
+  const text = value.trim();
+  return /^(test|expense tracker app)$/i.test(text) || /page\s*\(?\d+\)?|break|^-{3,}/i.test(text)
+    ? ''
+    : text;
+}
+
+function isCurrentExperience(item: ProfessionalExperience) {
+  return /present|current|now/i.test(item.endDate);
 }
 
 function emptyExperience(): ProfessionalExperience {
@@ -60,14 +73,14 @@ export default function ProfessionalProfileScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
   const displayName = useSessionStore((s) => s.displayName);
+  const accountEmail = useSessionStore((s) => s.email);
+  const avatarUrl = useProfileStore((s) => s.avatarUrl);
   const professionLabel = useProfileStore((s) => s.professionLabel);
   const profile = useProfileStore((s) => s.professionalProfile);
   const updateProfessionalProfile = useProfileStore((s) => s.updateProfessionalProfile);
-  const replaceProfessionalProfile = useProfileStore((s) => s.replaceProfessionalProfile);
-  const lastCvText = useMetricsStore((s) => s.lastCvText);
-  const lastCvFileName = useMetricsStore((s) => s.lastCvFileName);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProfessionalProfile>(profile);
+  const educationItems = profile.education ?? [];
 
   useEffect(() => {
     if (!editing) setDraft(profile);
@@ -77,31 +90,23 @@ export default function ProfessionalProfileScreen() {
     Boolean(profile.updatedAt) ||
     Boolean(profile.bio) ||
     profile.experiences.length > 0 ||
+    educationItems.length > 0 ||
     profile.technicalSkills.length > 0 ||
     profile.softSkills.length > 0 ||
     profile.certifications.length > 0;
 
-  const visibleName = profile.fullName || displayName || 'Your Name';
-  const visibleHeadline = profile.headline || professionLabel || 'Add your headline';
-
-  useEffect(() => {
-    if (hasProfile || !lastCvText.trim()) return;
-    replaceProfessionalProfile(
-      parseProfessionalProfileFromResume({
-        resumeText: lastCvText,
-        fileName: lastCvFileName,
-        displayName,
-        fallbackHeadline: professionLabel,
-      })
-    );
-  }, [
-    displayName,
-    hasProfile,
-    lastCvFileName,
-    lastCvText,
-    professionLabel,
-    replaceProfessionalProfile,
-  ]);
+  const visibleName = usefulName(profile.fullName) || usefulName(displayName) || 'Your Name';
+  const currentExperience = profile.experiences.find(isCurrentExperience);
+  const pastExperiences = profile.experiences.filter((item) => !isCurrentExperience(item));
+  const visibleHeadline =
+    profile.source === 'resume'
+      ? currentExperience?.title ||
+        usefulProfession(profile.currentDesignation) ||
+        usefulProfession(profile.headline) ||
+        usefulProfession(professionLabel) ||
+        'Add your headline'
+      : usefulProfession(profile.headline) || usefulProfession(professionLabel) || 'Add your headline';
+  const visibleEmail = profile.email || accountEmail;
 
   function patchDraft(patch: Partial<ProfessionalProfile>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -126,7 +131,7 @@ export default function ProfessionalProfileScreen() {
   function save() {
     updateProfessionalProfile({
       ...draft,
-      source: draft.source === 'resume' ? 'resume' : 'manual',
+      source: 'manual',
     });
     setEditing(false);
   }
@@ -179,13 +184,20 @@ export default function ProfessionalProfileScreen() {
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.cover} />
         <View style={[styles.avatar, { borderColor: colors.card }]}>
-          <Ionicons name="person-outline" size={42} color={colors.primary} />
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+          ) : (
+            <Ionicons name="person-outline" size={42} color={colors.primary} />
+          )}
         </View>
         <View style={styles.heroBody}>
           {editing ? (
             <>
               <Field label="Full name" value={draft.fullName} onChangeText={(fullName) => patchDraft({ fullName })} />
               <Field label="Headline / designation" value={draft.headline} onChangeText={(headline) => patchDraft({ headline })} />
+              <Field label="Location" value={draft.location} onChangeText={(location) => patchDraft({ location })} />
+              <Field label="Email" value={draft.email} onChangeText={(email) => patchDraft({ email })} />
+              <Field label="Phone" value={draft.phone} onChangeText={(phone) => patchDraft({ phone })} />
             </>
           ) : (
             <>
@@ -193,6 +205,11 @@ export default function ProfessionalProfileScreen() {
               <AppText variant="body" muted style={styles.boldText}>
                 {visibleHeadline}
               </AppText>
+              <View style={styles.contactList}>
+                {profile.location ? <ContactLine icon="location-outline" value={profile.location} /> : null}
+                {visibleEmail ? <ContactLine icon="mail-outline" value={visibleEmail} /> : null}
+                {profile.phone ? <ContactLine icon="call-outline" value={profile.phone} /> : null}
+              </View>
             </>
           )}
           <View style={[styles.sourcePill, { backgroundColor: `${colors.primary}18` }]}>
@@ -223,13 +240,7 @@ export default function ProfessionalProfileScreen() {
       <SectionCard
         title="Current Employment"
         icon="briefcase-outline"
-        action={
-          editing ? null : (
-            <AppText variant="caption" muted>
-              {profile.employmentStatus || 'Not set'}
-            </AppText>
-          )
-        }>
+      >
         {editing ? (
           <>
             <Field label="Current company" value={draft.currentCompany} onChangeText={(currentCompany) => patchDraft({ currentCompany })} />
@@ -237,10 +248,14 @@ export default function ProfessionalProfileScreen() {
             <Field label="Employment status" value={draft.employmentStatus} onChangeText={(employmentStatus) => patchDraft({ employmentStatus })} placeholder="Employed, Open to work, Freelance..." />
           </>
         ) : (
-          <View style={styles.currentGrid}>
-            <InfoTile label="Company" value={profile.currentCompany || 'Add company'} />
-            <InfoTile label="Designation" value={profile.currentDesignation || visibleHeadline} />
-          </View>
+          currentExperience ? (
+            <ExperienceCard experience={currentExperience} />
+          ) : (
+            <CurrentEmploymentCard
+              company={profile.currentCompany}
+              role={usefulProfession(profile.currentDesignation) || visibleHeadline}
+            />
+          )
         )}
       </SectionCard>
 
@@ -275,11 +290,21 @@ export default function ProfessionalProfileScreen() {
               onPress={() => patchDraft({ experiences: [emptyExperience()] })}
             />
           )
-        ) : profile.experiences.length ? (
-          profile.experiences.map((item) => <ExperienceCard key={item.id} experience={item} />)
+        ) : pastExperiences.length ? (
+          pastExperiences.map((item) => <ExperienceCard key={item.id} experience={item} />)
         ) : (
           <AppText variant="body" muted>
             Add companies, job titles, employment dates, achievements, and role-specific skills.
+          </AppText>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Education" icon="school-outline">
+        {educationItems.length ? (
+          educationItems.map((item) => <EducationCard key={item.id} education={item} />)
+        ) : (
+          <AppText variant="body" muted>
+            Education details from your CV will appear here.
           </AppText>
         )}
       </SectionCard>
@@ -443,6 +468,30 @@ function InfoTile({ label, value }: { label: string; value: string }) {
   );
 }
 
+function CurrentEmploymentCard({ company, role }: { company?: string; role?: string }) {
+  const { colors } = useAppTheme();
+  return (
+    <View style={[styles.currentEmploymentCard, { borderColor: colors.border, backgroundColor: colors.background }]}>
+      <AppText variant="subtitle">{role || 'Add role'}</AppText>
+      <AppText variant="body" muted style={styles.boldText}>
+        {company || 'Add company'}
+      </AppText>
+    </View>
+  );
+}
+
+function ContactLine({ icon, value }: { icon: keyof typeof Ionicons.glyphMap; value: string }) {
+  const { colors } = useAppTheme();
+  return (
+    <View style={styles.contactLine}>
+      <Ionicons name={icon} size={15} color={colors.textMuted} />
+      <AppText variant="caption" muted style={styles.boldText}>
+        {value}
+      </AppText>
+    </View>
+  );
+}
+
 function ExperienceCard({ experience }: { experience: ProfessionalExperience }) {
   const { colors } = useAppTheme();
   return (
@@ -464,6 +513,27 @@ function ExperienceCard({ experience }: { experience: ProfessionalExperience }) 
         </View>
       ) : null}
       {experience.skills.length ? <ChipGroup title="Skills used" items={experience.skills} /> : null}
+    </View>
+  );
+}
+
+function EducationCard({ education }: { education: ProfessionalEducation }) {
+  const { colors } = useAppTheme();
+  const title =
+    education.degree && education.fieldOfStudy && !education.degree.toLowerCase().includes(education.fieldOfStudy.toLowerCase())
+      ? `${education.degree} in ${education.fieldOfStudy}`
+      : education.degree || education.fieldOfStudy;
+  return (
+    <View style={[styles.experienceCard, { borderColor: colors.border, backgroundColor: colors.background }]}>
+      <AppText variant="subtitle">{title || 'Education'}</AppText>
+      <AppText variant="body" muted style={styles.boldText}>
+        {education.institution || 'Institution'} • {[education.startDate, education.endDate].filter(Boolean).join(' - ') || 'Dates'}
+      </AppText>
+      {education.description ? (
+        <AppText variant="body" muted>
+          {education.description}
+        </AppText>
+      ) : null}
     </View>
   );
 }
@@ -610,6 +680,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: -43,
     marginLeft: spacing.xl,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   heroBody: {
     padding: spacing.xl,
@@ -625,6 +700,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     marginTop: spacing.xs,
+  },
+  contactList: {
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  contactLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   sectionCard: {
     borderWidth: 1,
@@ -647,6 +731,12 @@ const styles = StyleSheet.create({
   currentGrid: {
     flexDirection: 'row',
     gap: spacing.md,
+  },
+  currentEmploymentCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: spacing.lg,
+    gap: spacing.xs,
   },
   infoTile: {
     flex: 1,

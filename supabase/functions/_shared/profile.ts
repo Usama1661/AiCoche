@@ -31,30 +31,45 @@ function objectOrEmpty(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function usefulProfession(value: unknown) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return /ai career coach app/i.test(text) ? '' : text;
+}
+
+function usefulName(value: unknown) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return /^(test|expense tracker app)$/i.test(text) || /page\s*\(?\d+\)?|break|^-{3,}/i.test(text)
+    ? ''
+    : text;
+}
+
 function appProfileSnapshot(existingProfile: Record<string, unknown> | null, analysis: CvAiAnalysis) {
   const existingAi = objectOrEmpty(existingProfile?.ai_profile);
   const existingProfessional = objectOrEmpty(existingAi.professionalProfile);
+  const hasManualIdentity = existingProfessional.source === 'manual';
   const current = analysis.experiences.find((item) => /present|current|now/i.test(item.endDate)) ?? analysis.experiences[0];
   const technicalSkills = analysis.skills
-    .filter((item) => item.category !== 'soft' && item.category !== 'tool')
+    .filter((item) => item.category !== 'soft')
     .map((item) => item.name);
   const softSkills = analysis.skills.filter((item) => item.category === 'soft').map((item) => item.name);
   const tools = analysis.skills.filter((item) => item.category === 'tool').map((item) => item.name);
 
   return {
     ...existingAi,
-    professionLabel: analysis.currentRole || existingAi.professionLabel || '',
-    skills: uniq([...((Array.isArray(existingAi.skills) ? existingAi.skills : []) as string[]), ...technicalSkills]),
-    tools: uniq([...((Array.isArray(existingAi.tools) ? existingAi.tools : []) as string[]), ...tools]),
-    projects: uniq([
-      ...((Array.isArray(existingAi.projects) ? existingAi.projects : []) as string[]),
-      ...analysis.projects.map((item) => item.name),
-    ]),
+    professionLabel: usefulProfession(existingAi.professionLabel) || analysis.currentRole || '',
+    skills: uniq(technicalSkills),
+    tools: uniq(tools),
+    projects: uniq(analysis.projects.map((item) => item.name)),
     professionalProfile: {
       ...existingProfessional,
-      fullName: analysis.fullName || existingProfessional.fullName || '',
-      headline: analysis.currentRole || current?.title || existingProfessional.headline || '',
-      bio: analysis.summary || existingProfessional.bio || '',
+      fullName: hasManualIdentity ? usefulName(existingProfessional.fullName) || analysis.fullName : analysis.fullName,
+      email: analysis.email || String(existingProfessional.email || ''),
+      phone: analysis.phone || String(existingProfessional.phone || ''),
+      location: analysis.location || String(existingProfessional.location || ''),
+      headline: hasManualIdentity
+        ? usefulProfession(existingProfessional.headline) || analysis.currentRole || current?.title || ''
+        : analysis.currentRole || current?.title || '',
+      bio: analysis.summary || '',
       experiences: analysis.experiences.map((item, index) => ({
         id: `resume-experience-${index + 1}`,
         company: item.company,
@@ -64,8 +79,19 @@ function appProfileSnapshot(existingProfile: Record<string, unknown> | null, ana
         responsibilities: uniq([...item.responsibilities, ...item.achievements]),
         skills: uniq(item.skills),
       })),
-      currentCompany: current?.company || existingProfessional.currentCompany || '',
-      currentDesignation: analysis.currentRole || current?.title || existingProfessional.currentDesignation || '',
+      education: analysis.education.map((item, index) => ({
+        id: `resume-education-${index + 1}`,
+        institution: item.institution,
+        degree: item.degree,
+        fieldOfStudy: item.fieldOfStudy,
+        startDate: item.startDate,
+        endDate: item.endDate,
+        description: item.description,
+      })),
+      currentCompany: current?.company || '',
+      currentDesignation: hasManualIdentity
+        ? usefulProfession(existingProfessional.currentDesignation) || analysis.currentRole || current?.title || ''
+        : analysis.currentRole || current?.title || '',
       employmentStatus: current ? 'employed' : existingProfessional.employmentStatus || 'open_to_work',
       technicalSkills: uniq(technicalSkills),
       softSkills: uniq(softSkills),
@@ -123,19 +149,32 @@ export async function saveAnalysisAndAutofill({
   const current = analysis.experiences.find((item) => /present|current|now/i.test(item.endDate)) ?? analysis.experiences[0];
   const { data: existingProfile, error: existingProfileError } = await supabase
     .from('profiles')
-    .select('ai_profile, avatar_url')
+    .select('full_name, email, phone, headline, current_designation, ai_profile, avatar_url')
     .eq('id', userId)
     .maybeSingle();
 
   if (existingProfileError) throw existingProfileError;
 
+  const existingAi = objectOrEmpty(existingProfile?.ai_profile);
+  const existingProfessional = objectOrEmpty(existingAi.professionalProfile);
+  const hasManualIdentity = existingProfessional.source === 'manual';
+  const manualHeadline = hasManualIdentity
+    ? usefulProfession(existingProfessional.headline || existingProfile?.headline)
+    : '';
+  const manualDesignation = hasManualIdentity
+    ? usefulProfession(existingProfessional.currentDesignation || existingProfile?.current_designation)
+    : '';
+  const fullName = hasManualIdentity
+    ? usefulName(existingProfessional.fullName || existingProfile?.full_name) || analysis.fullName
+    : analysis.fullName || existingProfile?.full_name || null;
+
   const { error: profileError } = await supabase.from('profiles').upsert({
     id: userId,
-    full_name: analysis.fullName || null,
-    email: analysis.email || null,
-    phone: analysis.phone || null,
-    headline: analysis.currentRole || current?.title || null,
-    current_designation: analysis.currentRole || current?.title || null,
+    full_name: fullName,
+    email: existingProfile?.email ?? analysis.email ?? null,
+    phone: existingProfile?.phone ?? analysis.phone ?? null,
+    headline: manualHeadline || analysis.currentRole || current?.title || null,
+    current_designation: manualDesignation || analysis.currentRole || current?.title || null,
     current_company: current?.company || null,
     employment_status: current ? 'employed' : 'open_to_work',
     summary: analysis.summary || null,
@@ -145,8 +184,19 @@ export async function saveAnalysisAndAutofill({
 
   if (profileError) throw profileError;
 
+  const previousCvDeletes = await Promise.all([
+    supabase.from('work_experiences').delete().eq('user_id', userId).not('source_cv_document_id', 'is', null),
+    supabase.from('educations').delete().eq('user_id', userId).not('source_cv_document_id', 'is', null),
+    supabase.from('skills').delete().eq('user_id', userId).not('source_cv_document_id', 'is', null),
+    supabase.from('certifications').delete().eq('user_id', userId).not('source_cv_document_id', 'is', null),
+    supabase.from('projects').delete().eq('user_id', userId).not('source_cv_document_id', 'is', null),
+  ]);
+
+  for (const result of previousCvDeletes) {
+    if (result.error) throw result.error;
+  }
+
   if (analysis.experiences.length) {
-    await supabase.from('work_experiences').delete().eq('user_id', userId).eq('source_cv_document_id', cvDocumentId);
     const { error } = await supabase.from('work_experiences').insert(
       analysis.experiences.map((item) => ({
         user_id: userId,
@@ -165,7 +215,6 @@ export async function saveAnalysisAndAutofill({
   }
 
   if (analysis.education.length) {
-    await supabase.from('educations').delete().eq('user_id', userId).eq('source_cv_document_id', cvDocumentId);
     const { error } = await supabase.from('educations').insert(
       analysis.education.map((item) => ({
         user_id: userId,
@@ -182,8 +231,6 @@ export async function saveAnalysisAndAutofill({
   }
 
   if (analysis.skills.length) {
-    await supabase.from('skills').delete().eq('user_id', userId).eq('source_cv_document_id', cvDocumentId);
-
     const skills = uniqSkills(analysis.skills);
     const names = skills.map((item) => item.name.trim());
     const existing =
@@ -211,7 +258,6 @@ export async function saveAnalysisAndAutofill({
   }
 
   if (analysis.certifications.length) {
-    await supabase.from('certifications').delete().eq('user_id', userId).eq('source_cv_document_id', cvDocumentId);
     const { error } = await supabase.from('certifications').insert(
       analysis.certifications.map((item) => ({
         user_id: userId,
@@ -226,7 +272,6 @@ export async function saveAnalysisAndAutofill({
   }
 
   if (analysis.projects.length) {
-    await supabase.from('projects').delete().eq('user_id', userId).eq('source_cv_document_id', cvDocumentId);
     const { error } = await supabase.from('projects').insert(
       analysis.projects.map((item) => ({
         user_id: userId,

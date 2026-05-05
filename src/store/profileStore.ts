@@ -63,9 +63,13 @@ type ProfileState = ProfileSnapshot & {
 
 export const emptyProfessionalProfile: ProfessionalProfile = {
   fullName: '',
+  email: '',
+  phone: '',
+  location: '',
   headline: '',
   bio: '',
   experiences: [],
+  education: [],
   currentCompany: '',
   currentDesignation: '',
   employmentStatus: '',

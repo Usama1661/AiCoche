@@ -15,6 +15,16 @@ export type ProfessionalExperience = {
   skills: string[];
 };
 
+export type ProfessionalEducation = {
+  id: string;
+  institution: string;
+  degree: string;
+  fieldOfStudy: string;
+  startDate: string;
+  endDate: string;
+  description: string;
+};
+
 export type Certification = {
   id: string;
   name: string;
@@ -24,9 +34,13 @@ export type Certification = {
 
 export type ProfessionalProfile = {
   fullName: string;
+  email: string;
+  phone: string;
+  location: string;
   headline: string;
   bio: string;
   experiences: ProfessionalExperience[];
+  education: ProfessionalEducation[];
   currentCompany: string;
   currentDesignation: string;
   employmentStatus: string;

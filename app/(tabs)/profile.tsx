@@ -22,6 +22,14 @@ import { useSessionStore } from '@/src/store/sessionStore';
 import { FREE_CHAT_LIMIT, FREE_CV_LIMIT, useUsageStore } from '@/src/store/usageStore';
 import { spacing } from '@/src/theme/tokens';
 
+function usefulProfileText(value: string) {
+  return /ai career coach app/i.test(value) ? '' : value;
+}
+
+function usefulProfileName(value: string) {
+  return /^(test|expense tracker app)$/i.test(value.trim()) ? '' : value;
+}
+
 function labelExperience(id: string) {
   if (id === 'beginner') return 'Beginner (0–1 years)';
   if (id === 'intermediate') return 'Intermediate (1–3 years)';
@@ -72,12 +80,14 @@ export default function ProfileScreen() {
   const [draft, setDraft] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const accountName = usefulProfileName(displayName) || email.split('@')[0] || 'User';
+  const profileName = accountName;
   const [profileDraft, setProfileDraft] = useState({
-    fullName: professionalProfile.fullName || displayName,
+    fullName: profileName,
     professionLabel,
     language,
   });
-  const visibleName = professionalProfile.fullName || displayName || 'Your profile';
+  const visibleName = profileName || 'Your profile';
 
   function saveDraft() {
     if (!modal) return;
@@ -92,7 +102,7 @@ export default function ProfileScreen() {
 
   function openEditProfile() {
     setProfileDraft({
-      fullName: professionalProfile.fullName || displayName,
+      fullName: accountName,
       professionLabel,
       language,
     });
@@ -106,8 +116,9 @@ export default function ProfileScreen() {
 
     updateProfessionalProfile({
       fullName,
-      headline: professionalProfile.headline || nextProfession,
-      source: professionalProfile.source ?? 'manual',
+      headline: nextProfession || professionalProfile.headline,
+      currentDesignation: nextProfession || professionalProfile.currentDesignation,
+      source: 'manual',
     });
     setOnboardingField({
       professionLabel: nextProfession,
@@ -195,7 +206,7 @@ export default function ProfileScreen() {
           <View style={styles.rolePill}>
             <Ionicons name="briefcase-outline" size={14} color={colors.primary} />
             <AppText variant="caption" style={{ color: colors.primary, fontWeight: '900' }}>
-              {professionLabel || 'Profession not set'}
+              {usefulProfileText(professionLabel) || usefulProfileText(professionalProfile.currentDesignation) || 'Profession not set'}
             </AppText>
           </View>
         </View>

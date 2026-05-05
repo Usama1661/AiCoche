@@ -17,9 +17,13 @@ export type ProfileSnapshot = {
 
 const emptyProfessionalProfile: ProfessionalProfile = {
   fullName: '',
+  email: '',
+  phone: '',
+  location: '',
   headline: '',
   bio: '',
   experiences: [],
+  education: [],
   currentCompany: '',
   currentDesignation: '',
   employmentStatus: '',
@@ -33,6 +37,7 @@ const emptyProfessionalProfile: ProfessionalProfile = {
 type ProfileRow = {
   full_name: string | null;
   email: string | null;
+  phone: string | null;
   headline: string | null;
   current_designation: string | null;
   current_company: string | null;
@@ -46,12 +51,22 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function usefulName(value: string | null | undefined) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return /^(test|expense tracker app)$/i.test(text) || /page\s*\(?\d+\)?|break|^-{3,}/i.test(text)
+    ? ''
+    : text;
+}
+
 export function mergeProfileFromRow(row: ProfileRow): ProfileSnapshot {
   const ai = row.ai_profile ?? {};
   const professionalProfile = {
     ...emptyProfessionalProfile,
     ...(typeof ai.professionalProfile === 'object' && ai.professionalProfile ? ai.professionalProfile : {}),
-    fullName: ai.professionalProfile?.fullName || row.full_name || '',
+    fullName: usefulName(ai.professionalProfile?.fullName) || usefulName(row.full_name),
+    email: ai.professionalProfile?.email || row.email || '',
+    phone: ai.professionalProfile?.phone || row.phone || '',
+    location: ai.professionalProfile?.location || '',
     headline: ai.professionalProfile?.headline || row.headline || '',
     bio: ai.professionalProfile?.bio || row.summary || '',
     currentDesignation: ai.professionalProfile?.currentDesignation || row.current_designation || '',
@@ -87,7 +102,7 @@ export async function loadProfileSnapshot(): Promise<ProfileSnapshot | null> {
   const { data, error } = await supabase
     .from('profiles')
     .select(
-      'full_name,email,headline,current_designation,current_company,employment_status,avatar_url,summary,ai_profile'
+      'full_name,email,phone,headline,current_designation,current_company,employment_status,avatar_url,summary,ai_profile'
     )
     .eq('id', user.id)
     .maybeSingle<ProfileRow>();
@@ -109,13 +124,14 @@ export async function saveProfileSnapshot(snapshot: ProfileSnapshot): Promise<vo
 
   const professionalProfile = snapshot.professionalProfile;
   const fullName =
-    professionalProfile.fullName ||
+    usefulName(professionalProfile.fullName) ||
     (typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : null);
 
   const { error } = await supabase.from('profiles').upsert({
     id: user.id,
     email: user.email,
     full_name: fullName,
+    phone: professionalProfile.phone || null,
     headline: professionalProfile.headline || snapshot.professionLabel || null,
     current_designation: professionalProfile.currentDesignation || null,
     current_company: professionalProfile.currentCompany || null,

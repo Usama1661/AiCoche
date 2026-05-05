@@ -10,10 +10,7 @@ import { Screen } from '@/src/components/ui/Screen';
 import { AppHeader } from '@/src/components/layout/AppHeader';
 import { ErrorBanner } from '@/src/components/ui/ErrorBanner';
 import { uploadCv } from '@/src/lib/api/cv';
-import { parseProfessionalProfileFromResume } from '@/src/lib/resumeProfileParser';
 import { useMetricsStore } from '@/src/store/metricsStore';
-import { useProfileStore } from '@/src/store/profileStore';
-import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { spacing } from '@/src/theme/tokens';
 
@@ -25,9 +22,6 @@ export default function CvUploadScreen() {
   const lastCvDocumentId = useMetricsStore((s) => s.lastCvDocumentId);
   const lastCvStatus = useMetricsStore((s) => s.lastCvStatus);
   const lastCvFileName = useMetricsStore((s) => s.lastCvFileName);
-  const displayName = useSessionStore((s) => s.displayName);
-  const professionLabel = useProfileStore((s) => s.professionLabel);
-  const replaceProfessionalProfile = useProfileStore((s) => s.replaceProfessionalProfile);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,17 +55,6 @@ export default function CvUploadScreen() {
         data.cvDocument.status
       );
       setLastCvText(extractedText);
-
-      if (extractedText) {
-        replaceProfessionalProfile(
-          parseProfessionalProfileFromResume({
-            resumeText: extractedText,
-            fileName: file.name,
-            displayName,
-            fallbackHeadline: professionLabel,
-          })
-        );
-      }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not upload CV.';
       setError(message);
