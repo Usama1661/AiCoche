@@ -2,7 +2,6 @@ const fs = require('fs/promises');
 const zlib = require('zlib');
 const { formidable } = require('formidable');
 const mammoth = require('mammoth');
-const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
 const pdfParse = require('pdf-parse');
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -33,13 +32,6 @@ function parseMultipart(req) {
 
 async function extractPdf(buffer) {
   try {
-    const text = await extractPdfWithPdfJs(buffer);
-    if (text.trim().length > 20) return text;
-  } catch (error) {
-    console.warn('pdfjs extraction failed, trying pdf-parse', error);
-  }
-
-  try {
     const result = await pdfParse(buffer);
     const text = result.text || '';
     if (text.trim().length > 20) return text;
@@ -48,36 +40,6 @@ async function extractPdf(buffer) {
   }
 
   return fallbackPdfText(buffer);
-}
-
-async function extractPdfWithPdfJs(buffer) {
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(buffer),
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    disableFontFace: true,
-  });
-  const doc = await loadingTask.promise;
-  const pages = [];
-
-  try {
-    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
-      const page = await doc.getPage(pageNumber);
-      const content = await page.getTextContent({ normalizeWhitespace: true });
-      const pageText = content.items
-        .map((item) => ('str' in item ? item.str : ''))
-        .filter(Boolean)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      if (pageText) pages.push(pageText);
-    }
-  } finally {
-    await doc.destroy();
-  }
-
-  return pages.join('\n\n');
 }
 
 function decodePdfString(value) {
