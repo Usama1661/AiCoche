@@ -4,7 +4,9 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { hasSupabaseConfig, supabase } from '@/src/lib/supabase';
+import { useMetricsStore } from '@/src/store/metricsStore';
 import { useProfileStore } from '@/src/store/profileStore';
+import { useUsageStore } from '@/src/store/usageStore';
 
 type SignupResult = {
   needsEmailConfirmation: boolean;
@@ -52,9 +54,15 @@ function sessionFromUser(user: User): Pick<
   };
 }
 
+function resetUserScopedStores() {
+  useProfileStore.getState().reset();
+  useMetricsStore.getState().resetMetrics();
+  useUsageStore.getState().resetAllUsage();
+}
+
 export const useSessionStore = create<SessionState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       ...EMPTY_SESSION,
       setHasSeenAuthSplash: (v) => set({ hasSeenAuthSplash: v }),
       refreshSession: async () => {
@@ -70,11 +78,15 @@ export const useSessionStore = create<SessionState>()(
         if (error) throw error;
 
         if (!session?.user) {
-          useProfileStore.getState().reset();
+          resetUserScopedStores();
           set((state) => ({ ...EMPTY_SESSION, hasSeenAuthSplash: state.hasSeenAuthSplash }));
           return;
         }
 
+        const previousUserId = get().userId;
+        if (previousUserId && previousUserId !== session.user.id) {
+          resetUserScopedStores();
+        }
         set(sessionFromUser(session.user));
         await useProfileStore.getState().loadRemoteProfile();
       },
@@ -91,6 +103,10 @@ export const useSessionStore = create<SessionState>()(
         if (error) throw error;
         if (!data.user) throw new Error('No user returned from Supabase.');
 
+        const previousUserId = get().userId;
+        if (previousUserId !== data.user.id) {
+          resetUserScopedStores();
+        }
         set(sessionFromUser(data.user));
         await useProfileStore.getState().loadRemoteProfile();
       },
@@ -117,6 +133,10 @@ export const useSessionStore = create<SessionState>()(
           return { needsEmailConfirmation: true };
         }
 
+        const previousUserId = get().userId;
+        if (previousUserId !== data.user.id) {
+          resetUserScopedStores();
+        }
         set(sessionFromUser(data.user));
         await useProfileStore.getState().loadRemoteProfile();
         return { needsEmailConfirmation: false };
@@ -126,7 +146,7 @@ export const useSessionStore = create<SessionState>()(
           const { error } = await supabase.auth.signOut();
           if (error) throw error;
         }
-        useProfileStore.getState().reset();
+        resetUserScopedStores();
         set({ ...EMPTY_SESSION, hasSeenAuthSplash: true });
       },
     }),

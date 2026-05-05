@@ -22,22 +22,27 @@ type MetricsState = {
   setLastCvScore: (n: number | null) => void;
   setLastInterviewScore: (n: number | null) => void;
   setLastQuizResult: (score: number, level: string) => void;
+  resetMetrics: () => void;
+};
+
+const initialMetrics = {
+  lastCvScore: null,
+  lastInterviewScore: null,
+  lastQuizScore: null,
+  lastQuizLevel: null,
+  lastQuizDate: null,
+  lastCvDocumentId: null,
+  lastCvStatus: null,
+  lastCvFileName: null,
+  lastCvUri: null,
+  lastCvText: '',
+  lastAnalysis: null,
 };
 
 export const useMetricsStore = create<MetricsState>()(
   persist(
     (set) => ({
-      lastCvScore: null,
-      lastInterviewScore: null,
-      lastQuizScore: null,
-      lastQuizLevel: null,
-      lastQuizDate: null,
-      lastCvDocumentId: null,
-      lastCvStatus: null,
-      lastCvFileName: null,
-      lastCvUri: null,
-      lastCvText: '',
-      lastAnalysis: null,
+      ...initialMetrics,
       setLastCv: (fileName, uri, documentId = null, status = null) =>
         set({
           lastCvDocumentId: documentId,
@@ -58,6 +63,7 @@ export const useMetricsStore = create<MetricsState>()(
           lastQuizLevel: level,
           lastQuizDate: new Date().toISOString(),
         }),
+      resetMetrics: () => set({ ...initialMetrics }),
     }),
     { name: 'aicoche-metrics', storage: createJSONStorage(() => AsyncStorage) }
   )

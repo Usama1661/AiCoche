@@ -17,14 +17,19 @@ type UsageState = {
   canStartChat: () => boolean;
   canAnalyzeCv: () => boolean;
   resetUsage: () => void;
+  resetAllUsage: () => void;
+};
+
+const initialUsage = {
+  plan: 'free' as Plan,
+  chatsUsed: 0,
+  cvAnalysesUsed: 0,
 };
 
 export const useUsageStore = create<UsageState>()(
   persist(
     (set, get) => ({
-      plan: 'free',
-      chatsUsed: 0,
-      cvAnalysesUsed: 0,
+      ...initialUsage,
       setPlan: (p) => set({ plan: p }),
       incrementChat: () => set((s) => ({ chatsUsed: s.chatsUsed + 1 })),
       incrementCvAnalysis: () =>
@@ -40,6 +45,7 @@ export const useUsageStore = create<UsageState>()(
         return cvAnalysesUsed < FREE_CV_LIMIT;
       },
       resetUsage: () => set({ chatsUsed: 0, cvAnalysesUsed: 0 }),
+      resetAllUsage: () => set({ ...initialUsage }),
     }),
     { name: 'aicoche-usage', storage: createJSONStorage(() => AsyncStorage) }
   )

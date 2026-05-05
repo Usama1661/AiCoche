@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
         .single();
 
       if (error || !doc) return jsonResponse({ error: 'CV document not found' }, 404);
-      cvText = (doc.extracted_text ?? cvText).trim();
+      cvText = (cvText || doc.extracted_text || '').trim();
       if (looksLikePdfInternals(cvText)) {
         cvText = '';
       }

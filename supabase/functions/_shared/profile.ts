@@ -13,6 +13,18 @@ function uniq(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
+function uniqSkills(skills: CvAiAnalysis['skills']) {
+  const seen = new Set<string>();
+  return skills.filter((item) => {
+    const name = item.name.trim();
+    const category = item.category || 'technical';
+    const key = `${name.toLowerCase()}::${category}`;
+    if (!name || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function objectOrEmpty(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -170,16 +182,31 @@ export async function saveAnalysisAndAutofill({
   }
 
   if (analysis.skills.length) {
-    const { error } = await supabase.from('skills').upsert(
-      analysis.skills.map((item) => ({
+    await supabase.from('skills').delete().eq('user_id', userId).eq('source_cv_document_id', cvDocumentId);
+
+    const skills = uniqSkills(analysis.skills);
+    const names = skills.map((item) => item.name.trim());
+    const existing =
+      names.length > 0
+        ? await supabase.from('skills').select('name, category').eq('user_id', userId).in('name', names)
+        : { data: [], error: null };
+
+    if (existing.error) throw existing.error;
+
+    const existingKeys = new Set(
+      (existing.data ?? []).map((item) => `${String(item.name).toLowerCase()}::${String(item.category)}`)
+    );
+    const rows = skills
+      .filter((item) => !existingKeys.has(`${item.name.trim().toLowerCase()}::${item.category || 'technical'}`))
+      .map((item) => ({
         user_id: userId,
-        name: item.name,
+        name: item.name.trim(),
         category: item.category || 'technical',
         proficiency: item.proficiency || null,
         source_cv_document_id: cvDocumentId,
-      })),
-      { onConflict: 'user_id,name,category' }
-    );
+      }));
+
+    const { error } = rows.length ? await supabase.from('skills').insert(rows) : { error: null };
     if (error) throw error;
   }
 
