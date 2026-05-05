@@ -308,7 +308,7 @@ export default function AiQuizScreen() {
                 style={({ pressed }) => [
                   styles.option,
                   {
-                    backgroundColor: selected ? colors.primaryTint : colors.background,
+                    backgroundColor: selected ? colors.primaryTint : colors.card,
                     borderColor: selected ? colors.primary : colors.border,
                     opacity: pressed ? 0.88 : 1,
                   },

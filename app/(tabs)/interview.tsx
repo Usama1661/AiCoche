@@ -44,7 +44,7 @@ export default function InterviewTabScreen() {
           <AppText variant="subtitle" style={[styles.heroTitle, { color: colors.textInverse }]}>
             Start New Interview
           </AppText>
-          <AppText variant="body" style={[styles.heroText, { color: colors.text }]} numberOfLines={1}>
+          <AppText variant="body" style={[styles.heroText, { color: colors.textInverse }]} numberOfLines={1}>
             AI-powered {professionLabel || 'career'} interview
           </AppText>
         </View>
