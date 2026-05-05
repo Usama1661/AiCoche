@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/extract-text.js": {
+      "maxDuration": 30
+    }
+  }
+}

@@ -13,6 +13,62 @@ function uniq(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
+function objectOrEmpty(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function appProfileSnapshot(existingProfile: Record<string, unknown> | null, analysis: CvAiAnalysis) {
+  const existingAi = objectOrEmpty(existingProfile?.ai_profile);
+  const existingProfessional = objectOrEmpty(existingAi.professionalProfile);
+  const current = analysis.experiences.find((item) => /present|current|now/i.test(item.endDate)) ?? analysis.experiences[0];
+  const technicalSkills = analysis.skills
+    .filter((item) => item.category !== 'soft' && item.category !== 'tool')
+    .map((item) => item.name);
+  const softSkills = analysis.skills.filter((item) => item.category === 'soft').map((item) => item.name);
+  const tools = analysis.skills.filter((item) => item.category === 'tool').map((item) => item.name);
+
+  return {
+    ...existingAi,
+    professionLabel: analysis.currentRole || existingAi.professionLabel || '',
+    skills: uniq([...((Array.isArray(existingAi.skills) ? existingAi.skills : []) as string[]), ...technicalSkills]),
+    tools: uniq([...((Array.isArray(existingAi.tools) ? existingAi.tools : []) as string[]), ...tools]),
+    projects: uniq([
+      ...((Array.isArray(existingAi.projects) ? existingAi.projects : []) as string[]),
+      ...analysis.projects.map((item) => item.name),
+    ]),
+    professionalProfile: {
+      ...existingProfessional,
+      fullName: analysis.fullName || existingProfessional.fullName || '',
+      headline: analysis.currentRole || current?.title || existingProfessional.headline || '',
+      bio: analysis.summary || existingProfessional.bio || '',
+      experiences: analysis.experiences.map((item, index) => ({
+        id: `resume-experience-${index + 1}`,
+        company: item.company,
+        title: item.title,
+        startDate: item.startDate,
+        endDate: item.endDate,
+        responsibilities: uniq([...item.responsibilities, ...item.achievements]),
+        skills: uniq(item.skills),
+      })),
+      currentCompany: current?.company || existingProfessional.currentCompany || '',
+      currentDesignation: analysis.currentRole || current?.title || existingProfessional.currentDesignation || '',
+      employmentStatus: current ? 'employed' : existingProfessional.employmentStatus || 'open_to_work',
+      technicalSkills: uniq(technicalSkills),
+      softSkills: uniq(softSkills),
+      certifications: analysis.certifications.map((item, index) => ({
+        id: `resume-certification-${index + 1}`,
+        name: item.name,
+        issuer: item.issuer,
+        date: item.date,
+      })),
+      source: 'resume',
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
 export async function saveAnalysisAndAutofill({
   supabase,
   userId,
@@ -53,6 +109,13 @@ export async function saveAnalysisAndAutofill({
   if (analysisError) throw analysisError;
 
   const current = analysis.experiences.find((item) => /present|current|now/i.test(item.endDate)) ?? analysis.experiences[0];
+  const { data: existingProfile, error: existingProfileError } = await supabase
+    .from('profiles')
+    .select('ai_profile, avatar_url')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (existingProfileError) throw existingProfileError;
 
   const { error: profileError } = await supabase.from('profiles').upsert({
     id: userId,
@@ -64,7 +127,8 @@ export async function saveAnalysisAndAutofill({
     current_company: current?.company || null,
     employment_status: current ? 'employed' : 'open_to_work',
     summary: analysis.summary || null,
-    ai_profile: analysis,
+    avatar_url: existingProfile?.avatar_url ?? null,
+    ai_profile: appProfileSnapshot(existingProfile, analysis),
   });
 
   if (profileError) throw profileError;

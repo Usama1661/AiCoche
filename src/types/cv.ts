@@ -19,3 +19,24 @@ export type CvDataRow = {
   analysis?: CvAnalysis;
   created_at?: string;
 };
+
+export type CvDocument = {
+  id: string;
+  user_id: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  storage_bucket: string;
+  storage_path: string;
+  extracted_text: string | null;
+  status: 'uploaded' | 'processing' | 'analyzed' | 'failed';
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UploadCvResponse = {
+  cvDocument: CvDocument;
+  extractedText: string;
+  nextStep: string;
+};

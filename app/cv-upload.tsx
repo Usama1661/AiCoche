@@ -1,5 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -7,6 +8,8 @@ import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
 import { Screen } from '@/src/components/ui/Screen';
 import { AppHeader } from '@/src/components/layout/AppHeader';
+import { ErrorBanner } from '@/src/components/ui/ErrorBanner';
+import { uploadCv } from '@/src/lib/api/cv';
 import { parseProfessionalProfileFromResume } from '@/src/lib/resumeProfileParser';
 import { useMetricsStore } from '@/src/store/metricsStore';
 import { useProfileStore } from '@/src/store/profileStore';
@@ -14,44 +17,72 @@ import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { spacing } from '@/src/theme/tokens';
 
-/** Placeholder until backend extracts PDF text */
-const PLACEHOLDER_CV_TEXT = `Experienced professional with a track record of shipping outcomes.
-Skills: communication, collaboration, problem solving.
-This text would be replaced by your Supabase pipeline after upload.`;
-
 export default function CvUploadScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
   const setLastCv = useMetricsStore((s) => s.setLastCv);
   const setLastCvText = useMetricsStore((s) => s.setLastCvText);
+  const lastCvDocumentId = useMetricsStore((s) => s.lastCvDocumentId);
+  const lastCvStatus = useMetricsStore((s) => s.lastCvStatus);
   const lastCvFileName = useMetricsStore((s) => s.lastCvFileName);
-  const lastCvUri = useMetricsStore((s) => s.lastCvUri);
   const displayName = useSessionStore((s) => s.displayName);
   const professionLabel = useProfileStore((s) => s.professionLabel);
   const replaceProfessionalProfile = useProfileStore((s) => s.replaceProfessionalProfile);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function pick() {
     const res = await DocumentPicker.getDocumentAsync({
-      type: 'application/pdf',
+      type: [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ],
       copyToCacheDirectory: true,
     });
     if (res.canceled) return;
     const file = res.assets[0];
-    if (!file?.name) return;
-    setLastCv(file.name, file.uri ?? null);
-    setLastCvText(PLACEHOLDER_CV_TEXT);
-    replaceProfessionalProfile(
-      parseProfessionalProfileFromResume({
-        resumeText: PLACEHOLDER_CV_TEXT,
-        fileName: file.name,
-        displayName,
-        fallbackHeadline: professionLabel,
-      })
-    );
+    if (!file?.name || !file.uri) return;
+
+    try {
+      setUploading(true);
+      setError(null);
+      const data = await uploadCv({
+        uri: file.uri,
+        name: file.name,
+        mimeType: file.mimeType || 'application/pdf',
+        size: file.size,
+      });
+      const extractedText = data.extractedText.trim();
+      setLastCv(
+        data.cvDocument.file_name,
+        file.uri,
+        data.cvDocument.id,
+        data.cvDocument.status
+      );
+      setLastCvText(extractedText);
+
+      if (extractedText) {
+        replaceProfessionalProfile(
+          parseProfessionalProfileFromResume({
+            resumeText: extractedText,
+            fileName: file.name,
+            displayName,
+            fallbackHeadline: professionLabel,
+          })
+        );
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not upload CV.';
+      setError(message);
+      Alert.alert('Upload failed', message);
+    } finally {
+      setUploading(false);
+    }
   }
 
   function analyze() {
-    if (!lastCvFileName) {
+    if (!lastCvDocumentId) {
       Alert.alert('No file', 'Choose a PDF first.');
       return;
     }
@@ -62,24 +93,27 @@ export default function CvUploadScreen() {
     <Screen scroll>
       <AppHeader title="Upload CV" onBack={() => router.back()} />
       <AppText variant="body" muted style={{ marginBottom: spacing.lg }}>
-        Select a PDF. Your backend will extract text and store it in `cv_data`.
+        Select a PDF, DOC, or DOCX. The file will be stored in Supabase and linked to your account.
       </AppText>
+      {error ? <ErrorBanner message={error} /> : null}
 
       <Pressable
         onPress={pick}
+        disabled={uploading}
         style={[
           styles.drop,
           {
             borderColor: colors.border,
             backgroundColor: colors.surface,
+            opacity: uploading ? 0.7 : 1,
           },
         ]}>
         <Ionicons name="document-text-outline" size={40} color={colors.primary} />
         <AppText variant="subtitle" style={{ marginTop: spacing.md }}>
-          Tap to choose PDF
+          {uploading ? 'Uploading CV...' : 'Tap to choose CV'}
         </AppText>
         <AppText variant="caption" muted style={{ marginTop: spacing.xs }}>
-          Drag & drop style — mobile friendly tap area
+          Supported formats: PDF, DOC, DOCX
         </AppText>
       </Pressable>
 
@@ -93,11 +127,25 @@ export default function CvUploadScreen() {
           <AppText variant="body" style={{ flex: 1 }} numberOfLines={1}>
             {lastCvFileName}
           </AppText>
-          <Button title="Replace" variant="ghost" onPress={pick} />
+          <Button title="Replace" variant="ghost" onPress={pick} disabled={uploading} />
         </View>
       ) : null}
 
-      <Button title="Analyze CV" onPress={analyze} disabled={!lastCvFileName} />
+      {lastCvDocumentId ? (
+        <View style={[styles.statusCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Ionicons name="checkmark-circle-outline" size={20} color={colors.success} />
+          <View style={{ flex: 1 }}>
+            <AppText variant="body" style={{ fontWeight: '900' }}>
+              CV saved to Supabase
+            </AppText>
+            <AppText variant="caption" muted>
+              Status: {lastCvStatus || 'uploaded'}
+            </AppText>
+          </View>
+        </View>
+      ) : null}
+
+      <Button title="Analyze CV" onPress={analyze} disabled={!lastCvDocumentId || uploading} />
     </Screen>
   );
 }
@@ -112,6 +160,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   fileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: spacing.lg,
+  },
+  statusCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,

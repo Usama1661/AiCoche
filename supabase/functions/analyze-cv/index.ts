@@ -2,6 +2,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { analyzeCvWithAi } from '../_shared/ai.ts';
+import { extractCvText } from '../_shared/files.ts';
 import { saveAnalysisAndAutofill } from '../_shared/profile.ts';
 import { isResponse, readJson, requireAuth } from '../_shared/supabase.ts';
 
@@ -39,17 +40,50 @@ Deno.serve(async (req) => {
     if (cvDocumentId) {
       const { data: doc, error } = await supabase
         .from('cv_documents')
-        .select('id, extracted_text, user_id')
+        .select('id, extracted_text, user_id, file_name, file_type, storage_bucket, storage_path')
         .eq('id', cvDocumentId)
         .eq('user_id', user.id)
         .single();
 
       if (error || !doc) return jsonResponse({ error: 'CV document not found' }, 404);
       cvText = (doc.extracted_text ?? cvText).trim();
+
+      if (!cvText) {
+        const { data: fileBlob, error: downloadError } = await supabase.storage
+          .from(doc.storage_bucket)
+          .download(doc.storage_path);
+
+        if (downloadError || !fileBlob) {
+          return jsonResponse({ error: 'Could not read the uploaded CV file from storage.' }, 400);
+        }
+
+        try {
+          const file = new File([fileBlob], doc.file_name, { type: doc.file_type });
+          cvText = (await extractCvText(file)).trim();
+        } catch (extractError) {
+          const message = extractError instanceof Error ? extractError.message : 'CV text extraction failed';
+          await supabase
+            .from('cv_documents')
+            .update({ status: 'failed', error_message: message })
+            .eq('id', cvDocumentId)
+            .eq('user_id', user.id);
+          return jsonResponse({ error: message }, 400);
+        }
+
+        if (cvText) {
+          await supabase
+            .from('cv_documents')
+            .update({ status: 'processing', extracted_text: cvText, error_message: null })
+            .eq('id', cvDocumentId)
+            .eq('user_id', user.id);
+        }
+      }
     }
 
     if (!cvText) {
-      return jsonResponse({ error: 'cvText or a cvDocumentId with extracted_text is required' }, 400);
+      return jsonResponse({
+        error: 'Could not extract text from this CV. Please upload a text-based PDF/DOCX or check CV_TEXT_EXTRACTOR_URL.',
+      }, 400);
     }
 
     const analysis = await analyzeCvWithAi(

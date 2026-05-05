@@ -53,6 +53,107 @@ const emptyAnalysis: CvAiAnalysis = {
   jobRoleFit: {},
 };
 
+function sectionBetween(text: string, start: RegExp, end: RegExp[]) {
+  const match = start.exec(text);
+  if (!match || match.index == null) return '';
+  const from = match.index + match[0].length;
+  const rest = text.slice(from);
+  const next = end
+    .map((pattern) => {
+      const found = pattern.exec(rest);
+      return found ? found.index : -1;
+    })
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0];
+  return (next == null ? rest : rest.slice(0, next)).trim();
+}
+
+function lines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-•]\s*/, '').trim())
+    .filter(Boolean);
+}
+
+function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysis {
+  const allLines = lines(cvText);
+  const email = cvText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? '';
+  const phone = cvText.match(/(?:\+?\d[\d\s().-]{7,}\d)/)?.[0]?.trim() ?? '';
+  const fullName = allLines[0] ?? '';
+  const currentRole = allLines[1] ?? targetRole ?? '';
+  const sectionEnds = [
+    /professional summary/i,
+    /work experience/i,
+    /education/i,
+    /skills/i,
+    /projects/i,
+    /certifications/i,
+  ];
+  const summary = sectionBetween(cvText, /professional summary/i, sectionEnds.filter((item) => !/professional/i.test(item.source)));
+  const workLines = lines(sectionBetween(cvText, /work experience/i, [/education/i, /skills/i, /projects/i, /certifications/i]));
+  const educationLines = lines(sectionBetween(cvText, /education/i, [/skills/i, /projects/i, /certifications/i]));
+  const skillNames = sectionBetween(cvText, /skills/i, [/projects/i, /certifications/i, /work experience/i])
+    .split(/[,;\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const projectLines = lines(sectionBetween(cvText, /projects/i, [/certifications/i]));
+
+  const experiences = workLines
+    .filter((line) => /developer|engineer|manager|designer|analyst|consultant|specialist/i.test(line))
+    .map((line) => {
+      const [titlePart, companyPart = ''] = line.split(/\s+[—-]\s+/);
+      return {
+        company: companyPart.split(',')[0]?.trim() ?? '',
+        title: titlePart.trim(),
+        startDate: '',
+        endDate: /present/i.test(line) ? 'Present' : '',
+        responsibilities: workLines.filter((item) => item !== line && !/\d{4}/.test(item)).slice(0, 4),
+        achievements: [],
+        skills: skillNames.slice(0, 8),
+      };
+    });
+
+  return {
+    ...emptyAnalysis,
+    fullName,
+    email,
+    phone,
+    currentRole,
+    summary: summary || cvText.slice(0, 500),
+    experiences,
+    education: educationLines.length
+      ? [
+          {
+            institution: educationLines[1] ?? educationLines[0] ?? '',
+            degree: educationLines[0] ?? '',
+            fieldOfStudy: '',
+            startDate: '',
+            endDate: educationLines.find((line) => /\d{4}/.test(line)) ?? '',
+            description: educationLines.join('\n'),
+          },
+        ]
+      : [],
+    skills: skillNames.map((name) => ({
+      name,
+      category: /xcode|android studio|git|github|expo|firebase|supabase/i.test(name) ? 'tool' : 'technical',
+      proficiency: '',
+    })),
+    projects: projectLines.map((name) => ({
+      name,
+      description: '',
+      role: '',
+      technologies: skillNames.slice(0, 6),
+      url: '',
+    })),
+    cvScore: cvText.length > 1200 ? 76 : 62,
+    strengths: ['CV content was parsed and structured successfully.'],
+    weaknesses: ['Add more quantified impact and measurable outcomes.'],
+    improvementSuggestions: ['Add metrics to each role.', 'Group skills by category.', 'Add links for projects where possible.'],
+    recommendedSkills: targetRole ? [`Skills aligned with ${targetRole}`] : ['Target-role keywords'],
+    jobRoleFit: {},
+  };
+}
+
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -92,15 +193,7 @@ export function normalizeCvAnalysis(value: Record<string, unknown>): CvAiAnalysi
 }
 
 export async function analyzeCvWithAi(cvText: string, targetRole?: string): Promise<CvAiAnalysis> {
-  const fallback = {
-    ...emptyAnalysis,
-    summary: cvText.slice(0, 500),
-    cvScore: cvText.length > 1200 ? 76 : 62,
-    strengths: ['Resume content is available for review.'],
-    weaknesses: ['Add more quantified outcomes and role-specific keywords.'],
-    improvementSuggestions: ['Include measurable achievements for each role.', 'Group skills by category.'],
-    recommendedSkills: targetRole ? [`Skills aligned with ${targetRole}`] : ['Target-role keywords'],
-  };
+  const fallback = parseFallbackAnalysis(cvText, targetRole);
 
   const raw = await chatCompletionJson(
     [

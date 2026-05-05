@@ -16,15 +16,18 @@ import { analyzeCv } from '@/src/lib/api/cv';
 import { buildUserProfileFromStores } from '@/src/lib/buildUserProfile';
 import type { CvAnalysis } from '@/src/types/cv';
 import { useMetricsStore } from '@/src/store/metricsStore';
+import { useProfileStore } from '@/src/store/profileStore';
 import { useUsageStore } from '@/src/store/usageStore';
 import { spacing } from '@/src/theme/tokens';
 
 export default function CvAnalysisScreen() {
   const router = useRouter();
+  const lastCvDocumentId = useMetricsStore((s) => s.lastCvDocumentId);
   const lastCvText = useMetricsStore((s) => s.lastCvText);
   const lastAnalysis = useMetricsStore((s) => s.lastAnalysis);
   const setLastAnalysis = useMetricsStore((s) => s.setLastAnalysis);
   const setLastCvScore = useMetricsStore((s) => s.setLastCvScore);
+  const loadRemoteProfile = useProfileStore((s) => s.loadRemoteProfile);
   const canAnalyze = useUsageStore((s) => s.canAnalyzeCv());
   const incrementCvAnalysis = useUsageStore((s) => s.incrementCvAnalysis);
   const plan = useUsageStore((s) => s.plan);
@@ -35,8 +38,8 @@ export default function CvAnalysisScreen() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const run = useCallback(async () => {
-    if (!lastCvText.trim()) {
-      setError('No CV text available. Upload a CV first.');
+    if (!lastCvDocumentId && !lastCvText.trim()) {
+      setError('No uploaded CV available. Upload a CV first.');
       return;
     }
     if (!canAnalyze) {
@@ -47,10 +50,15 @@ export default function CvAnalysisScreen() {
     setError(null);
     try {
       const profile = buildUserProfileFromStores();
-      const data = await analyzeCv({ cvText: lastCvText, profile });
+      const data = await analyzeCv({
+        cvDocumentId: lastCvDocumentId ?? undefined,
+        cvText: lastCvText,
+        profile,
+      });
       setResult(data);
       setLastAnalysis(data);
       if (data.overallScore != null) setLastCvScore(data.overallScore);
+      await loadRemoteProfile();
       incrementCvAnalysis();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
@@ -59,9 +67,11 @@ export default function CvAnalysisScreen() {
     }
   }, [
     lastCvText,
+    lastCvDocumentId,
     canAnalyze,
     setLastAnalysis,
     setLastCvScore,
+    loadRemoteProfile,
     incrementCvAnalysis,
   ]);
 
@@ -70,7 +80,7 @@ export default function CvAnalysisScreen() {
       setResult(lastAnalysis);
       return;
     }
-    if (!lastCvText.trim()) {
+    if (!lastCvDocumentId && !lastCvText.trim()) {
       setError('Upload a CV first, then open analysis again.');
       return;
     }

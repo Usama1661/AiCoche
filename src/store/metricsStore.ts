@@ -10,11 +10,13 @@ type MetricsState = {
   lastQuizScore: number | null;
   lastQuizLevel: string | null;
   lastQuizDate: string | null;
+  lastCvDocumentId: string | null;
+  lastCvStatus: string | null;
   lastCvFileName: string | null;
   lastCvUri: string | null;
   lastCvText: string;
   lastAnalysis: CvAnalysis | null;
-  setLastCv: (fileName: string | null, uri: string | null) => void;
+  setLastCv: (fileName: string | null, uri: string | null, documentId?: string | null, status?: string | null) => void;
   setLastCvText: (t: string) => void;
   setLastAnalysis: (a: CvAnalysis | null) => void;
   setLastCvScore: (n: number | null) => void;
@@ -30,14 +32,19 @@ export const useMetricsStore = create<MetricsState>()(
       lastQuizScore: null,
       lastQuizLevel: null,
       lastQuizDate: null,
+      lastCvDocumentId: null,
+      lastCvStatus: null,
       lastCvFileName: null,
       lastCvUri: null,
       lastCvText: '',
       lastAnalysis: null,
-      setLastCv: (fileName, uri) =>
+      setLastCv: (fileName, uri, documentId = null, status = null) =>
         set({
+          lastCvDocumentId: documentId,
+          lastCvStatus: status,
           lastCvFileName: fileName,
           lastCvUri: uri,
+          lastCvText: '',
           lastAnalysis: null,
           lastCvScore: null,
         }),
