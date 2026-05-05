@@ -7,6 +7,7 @@ import Animated, {
   Easing,
   FadeInRight,
   FadeInUp,
+  FadeOutLeft,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -271,10 +272,18 @@ function AnalyzingState() {
   const orbit = useSharedValue(0);
   const pulse = useSharedValue(1);
   const scan = useSharedValue(0);
+  const [quoteIndex, setQuoteIndex] = useState(0);
   const steps = [
     'Reading CV structure',
     'Finding strengths and gaps',
     'Building improvement plan',
+  ];
+  const quotes = [
+    'Small improvements in your CV can create big interview opportunities.',
+    'Your experience already has value. We are helping it speak clearly.',
+    'A strong CV does not just list work. It proves impact.',
+    'Every clear bullet makes it easier for recruiters to say yes.',
+    'The right words can turn your experience into confidence.',
   ];
 
   useEffect(() => {
@@ -297,6 +306,14 @@ function AnalyzingState() {
       false
     );
   }, [orbit, pulse, scan]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setQuoteIndex((current) => (current + 1) % quotes.length);
+    }, 3200);
+
+    return () => clearInterval(interval);
+  }, [quotes.length]);
 
   const orbitStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${orbit.value}deg` }],
@@ -352,6 +369,17 @@ function AnalyzingState() {
           </AppText>
         </Animated.View>
       ))}
+
+      <Animated.View
+        key={quotes[quoteIndex]}
+        entering={FadeInRight.duration(460)}
+        exiting={FadeOutLeft.duration(320)}
+        style={styles.analysisQuoteWrap}>
+        <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
+        <AppText variant="body" style={[styles.analysisQuoteText, { color: colors.text }]}>
+          "{quotes[quoteIndex]}"
+        </AppText>
+      </Animated.View>
     </View>
   );
 }
@@ -584,4 +612,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepText: { flex: 1, fontWeight: '800' },
+  analysisQuoteWrap: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+  },
+  analysisQuoteText: {
+    flex: 1,
+    textAlign: 'center',
+    fontWeight: '800',
+    lineHeight: 23,
+  },
 });

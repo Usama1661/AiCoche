@@ -34,3 +34,11 @@ export function hasSupabaseConfig(): boolean {
     anon !== 'placeholder';
   return looksReal;
 }
+
+export function getSupabaseUrl(): string {
+  return url;
+}
+
+export function getSupabaseAnonKey(): string {
+  return anon;
+}

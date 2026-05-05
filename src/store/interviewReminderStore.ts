@@ -7,9 +7,11 @@ import {
   isScheduledNotification,
   scheduleInterviewReminderNotification,
 } from '@/src/lib/notifications';
+import { hasSupabaseConfig, supabase } from '@/src/lib/supabase';
 
 type InterviewReminder = {
   id: string;
+  ownerUserId: string | null;
   notificationId: string;
   scheduledAt: string;
   title: string;
@@ -21,11 +23,20 @@ type InterviewReminderState = {
   scheduleReminder: (params: { scheduledAt: string; title: string }) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
   cancelReminder: () => Promise<void>;
+  resetReminders: () => void;
   clearExpiredReminder: () => void;
 };
 
 function createReminderId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+async function currentOwnerUserId() {
+  if (!hasSupabaseConfig()) return null;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user?.id ?? null;
 }
 
 export const useInterviewReminderStore = create<InterviewReminderState>()(
@@ -34,6 +45,7 @@ export const useInterviewReminderStore = create<InterviewReminderState>()(
       reminders: [],
       scheduleReminder: async ({ scheduledAt, title }) => {
         const id = createReminderId();
+        const ownerUserId = await currentOwnerUserId();
         const notificationId = await scheduleInterviewReminderNotification({
           reminderId: id,
           scheduledAt,
@@ -48,6 +60,7 @@ export const useInterviewReminderStore = create<InterviewReminderState>()(
           reminders: [
             {
               id,
+              ownerUserId,
               notificationId,
               scheduledAt,
               title,
@@ -71,6 +84,7 @@ export const useInterviewReminderStore = create<InterviewReminderState>()(
         );
         set({ reminders: [] });
       },
+      resetReminders: () => set({ reminders: [] }),
       clearExpiredReminder: () => {},
     }),
     {
@@ -89,6 +103,7 @@ export const useInterviewReminderStore = create<InterviewReminderState>()(
             {
               ...state.reminder,
               id: createReminderId(),
+              ownerUserId: null,
               createdAt: new Date().toISOString(),
             },
             ...(state.reminders ?? []),

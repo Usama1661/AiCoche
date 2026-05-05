@@ -70,6 +70,28 @@ function sectionBetween(text: string, start: RegExp, end: RegExp[]) {
   return (next == null ? rest : rest.slice(0, next)).trim();
 }
 
+function repairExtractedTextArtifacts(value: string) {
+  return value
+    .replace(/\bReact\s+Na[\w()]{1,5}e\b/gi, 'React Native')
+    .replace(/\bReact\s+Na\s*ve\b/gi, 'React Native')
+    .replace(/\bReact\s+Nati\s*ve\b/gi, 'React Native')
+    .replace(/\bJava\s*Script\b/g, 'JavaScript')
+    .replace(/\bType\s*Script\b/g, 'TypeScript')
+    .replace(/\bNode\s*\.?\s*js\b/gi, 'Node.js')
+    .replace(/\bFire\s*base\b/gi, 'Firebase')
+    .replace(/\bGit\s*Hub\b/gi, 'GitHub')
+    .replace(/\bhBps:\/\//gi, 'https://')
+    .replace(/\bPorJolio\b/gi, 'Portfolio');
+}
+
+function prepareCvText(text: string) {
+  return repairExtractedTextArtifacts(text)
+    .replace(/\s+(Summary|Professional Summary|Experience|Work Experience|Skills|Websites\s*&\s*Profiles|Education|Languages)\s+/gi, '\n$1\n')
+    .replace(/\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\s*(?:[–-]\s*)?(?:Present|Current|Now|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}))\s+/gi, '\n$1\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 function lines(value: string) {
   return value
     .split(/\r?\n/)
@@ -78,27 +100,13 @@ function lines(value: string) {
 }
 
 function normalizeCvTextOrder(text: string) {
-  const cvLines = lines(text);
-  const lower = cvLines.map((line) => line.toLowerCase());
-  const summaryIndex = lower.findIndex((line) => line.includes('professional summary'));
-  const workIndex = lower.findIndex((line) => line.includes('work experience'));
-  const educationIndex = lower.findIndex((line) => line === 'education' || line.includes('education'));
-  const skillsIndex = lower.findIndex((line) => line === 'skills' || line.includes('skills'));
-  const hasReversedSections =
-    (summaryIndex >= 0 && workIndex >= 0 && workIndex < summaryIndex) ||
-    (workIndex >= 0 && educationIndex >= 0 && educationIndex < workIndex) ||
-    (educationIndex >= 0 && skillsIndex >= 0 && skillsIndex < educationIndex);
-
-  if (hasReversedSections) {
-    return [...cvLines].reverse().join('\n');
-  }
-
-  return text;
+  return prepareCvText(text);
 }
 
 function cleanSummary(value: string) {
   return lines(value)
     .filter((line) => !isContactLine(line))
+    .filter((line) => !/linkedin|portfolio|github\.com|www\.|https?:\/\//i.test(line))
     .filter((line) => !/^-{3,}|page\s*\(?\d+\)?|break/i.test(line))
     .join('\n')
     .trim();
@@ -116,13 +124,19 @@ function isSectionHeading(value: string) {
 function looksLikePersonName(value: string) {
   const text = cleanName(value);
   if (!text || isContactLine(text) || isSectionHeading(text)) return false;
-  if (/developer|engineer|designer|manager|analyst|experience|university|company|software|app/i.test(text)) return false;
+  if (/developer|engineer|designer|manager|analyst|experience|university|company|software|app|optimization|bug|resolution|notification|feature|community|portfolio|linkedin/i.test(text)) return false;
   const words = text.split(/\s+/).filter(Boolean);
   return words.length >= 2 && words.length <= 5 && words.every((word) => /^[A-Z][A-Za-z.'-]+$/.test(word));
 }
 
 function extractFullNameFromCvText(text: string) {
   const cvLines = lines(text).map(cleanName).filter(Boolean);
+  const emailIndex = cvLines.findIndex((line) => /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(line));
+  if (emailIndex > 0) {
+    const nearby = cvLines.slice(Math.max(0, emailIndex - 5), emailIndex);
+    const name = [...nearby].reverse().find(looksLikePersonName);
+    if (name) return name;
+  }
   const firstRoleIndex = cvLines.findIndex((line) => /developer|engineer|designer|manager|analyst/i.test(line));
   const headerLines = cvLines.slice(0, firstRoleIndex > 0 ? firstRoleIndex : 8);
   return headerLines.find(looksLikePersonName) ?? cvLines.slice(0, 12).find(looksLikePersonName) ?? '';
@@ -134,6 +148,8 @@ function cleanIdentitySummary(value: string, fullName: string, currentRole: stri
   return lines(cleanSummary(value))
     .filter((line) => line.toLowerCase() !== name)
     .filter((line) => line.toLowerCase() !== role)
+    .filter((line) => !looksLikePersonName(line))
+    .filter((line) => !(role && line.toLowerCase().includes(role)))
     .join('\n')
     .trim();
 }
@@ -160,31 +176,48 @@ function isLikelySkill(value: string) {
 function isRoleLine(value: string) {
   return (
     /developer|engineer|designer|manager|analyst|consultant|specialist/i.test(value) &&
-    !/with\s+\d+\s+years|professional summary/i.test(value)
+    !/with\s+\d+\s+years|professional summary|summary|skills|websites|profiles|education|languages/i.test(value)
   );
 }
 
 function splitRoleLine(value: string) {
+  const withoutDate = removeDateRange(value).replace(/\s+/g, ' ').trim();
   if (/\s+[—-]\s+/.test(value)) {
-    const [title, company = ''] = value.split(/\s+[—-]\s+/);
+    const [title, company = ''] = withoutDate.split(/\s+[—-]\s+/);
     return { title: title.trim(), company: company.split(',')[0]?.trim() ?? '' };
   }
 
-  const match = value.match(/^(.+?\b(?:developer|engineer|designer|manager|analyst|consultant|specialist))\s+(.+)$/i);
+  const match = withoutDate.match(/^(.+?\b(?:developer|engineer|designer|manager|analyst|consultant|specialist))\s+(.+)$/i);
   return {
-    title: (match?.[1] ?? value).trim(),
+    title: (match?.[1] ?? withoutDate).trim(),
     company: (match?.[2] ?? '').split(',')[0]?.trim() ?? '',
   };
 }
 
+const dateRangePattern = /((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})\s*(?:[–-]\s*)?((?:present|current|now)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})/i;
+
 function parseDateRange(value: string) {
-  const match = value.match(
-    /((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})\s*[–-]\s*((?:present|current|now)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})/i
-  );
+  const match = value.match(dateRangePattern);
   return {
     startDate: match?.[1] ?? '',
     endDate: match?.[2] ?? '',
   };
+}
+
+function removeDateRange(value: string) {
+  return value.replace(dateRangePattern, '').trim();
+}
+
+function looksLikeCompanyLine(value: string) {
+  const line = value.trim();
+  return (
+    Boolean(line) &&
+    !isRoleLine(line) &&
+    !isContactLine(line) &&
+    !dateRangePattern.test(line) &&
+    !/developed|integrated|collaborated|identified|performed|created|automated|improved|resolved|took|built|designed/i.test(line) &&
+    /company|technologies|space|electric|pvt|ltd|inc|llc|organization|studio|labs|solutions|islamabad|lahore|karachi/i.test(line)
+  );
 }
 
 function parseWorkExperiences(workText: string, skillNames: string[]): CvAiAnalysis['experiences'] {
@@ -198,16 +231,18 @@ function parseWorkExperiences(workText: string, skillNames: string[]): CvAiAnaly
     const { title, company } = splitRoleLine(roleLine);
     const nextRoleIndex = workLines.findIndex((line, nextIndex) => nextIndex > index && isRoleLine(line));
     const block = workLines.slice(index + 1, nextRoleIndex === -1 ? workLines.length : nextRoleIndex);
-    const dateLine = block.find((line) => /\d{4}/.test(line)) ?? '';
+    const dateLine = [roleLine, ...block].find((line) => /\d{4}/.test(line)) ?? '';
     const { startDate, endDate } = parseDateRange(dateLine);
+    const companyLine = block.find(looksLikeCompanyLine) ?? '';
     const responsibilities = block
       .filter((line) => line !== dateLine)
+      .filter((line) => line !== companyLine)
       .filter((line) => !/^[A-Za-z\s]+,\s*[A-Za-z\s]+$/.test(line))
       .filter((line) => !isContactLine(line))
       .filter((line) => !/professional summary|education|skills/i.test(line));
 
     experiences.push({
-      company,
+      company: company || companyLine.split(',')[0]?.trim() || '',
       title,
       startDate,
       endDate,
@@ -254,6 +289,20 @@ function isValidExperience(item: CvAiAnalysis['experiences'][number]) {
   );
 }
 
+function normalizeExperienceFields(item: CvAiAnalysis['experiences'][number]) {
+  const combined = [item.title, item.company, item.startDate, item.endDate].filter(Boolean).join(' ');
+  const range = combined.match(dateRangePattern);
+  const companyLooksLikeEndDate = /^(present|current|now)$/i.test(item.company.trim());
+
+  return {
+    ...item,
+    title: removeDateRange(item.title).replace(/\s+/g, ' ').trim() || item.title,
+    company: companyLooksLikeEndDate ? '' : removeDateRange(item.company).replace(/\s+/g, ' ').trim(),
+    startDate: item.startDate || range?.[1] || '',
+    endDate: item.endDate || range?.[2] || (companyLooksLikeEndDate ? item.company : ''),
+  };
+}
+
 function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysis {
   cvText = normalizeCvTextOrder(cvText);
 
@@ -274,22 +323,22 @@ function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysi
     allLines.find((line) => /islamabad|rawalpindi|lahore|karachi|pakistan/i.test(line)) ??
     '';
   const fullName = extractFullNameFromCvText(cvText);
-  const currentRole =
-    allLines.find((line) => /developer|engineer|designer|manager|analyst/i.test(line) && !/with\s+\d+\s+years/i.test(line)) ??
-    targetRole ??
-    '';
+  const currentRoleLine = allLines.find((line) => isRoleLine(line) && /present|current|now/i.test(line)) ??
+    allLines.find(isRoleLine);
   const sectionEnds = [
-    /professional summary/i,
-    /work experience/i,
-    /education/i,
-    /skills/i,
-    /projects/i,
-    /certifications/i,
+    /^summary$/im,
+    /^professional summary$/im,
+    /^(?:work\s+)?experience$/im,
+    /^education$/im,
+    /^skills$/im,
+    /^projects$/im,
+    /^websites\s*&\s*profiles$/im,
+    /^languages$/im,
   ];
-  const summary = sectionBetween(cvText, /professional summary/i, sectionEnds.filter((item) => !/professional/i.test(item.source)));
-  const workText = sectionBetween(cvText, /work experience/i, [/education/i, /skills/i, /projects/i, /certifications/i]);
-  const education = parseEducation(sectionBetween(cvText, /education/i, [/skills/i, /projects/i, /certifications/i]));
-  const skillNames = sectionBetween(cvText, /skills/i, [/projects/i, /certifications/i, /work experience/i, /education/i])
+  const summary = sectionBetween(cvText, /^summary$|^professional summary$/im, sectionEnds.filter((item) => !/summary/i.test(item.source)));
+  const workText = sectionBetween(cvText, /^(?:work\s+)?experience$/im, [/^education$/im, /^skills$/im, /^projects$/im, /^websites\s*&\s*profiles$/im, /^languages$/im]);
+  const education = parseEducation(sectionBetween(cvText, /^education$/im, [/^skills$/im, /^projects$/im, /^websites\s*&\s*profiles$/im, /^languages$/im]));
+  const skillNames = sectionBetween(cvText, /^skills$/im, [/^projects$/im, /^websites\s*&\s*profiles$/im, /^education$/im, /^languages$/im])
     .split(/[,;\n]/)
     .map((item) => item.trim())
     .filter(isLikelySkill);
@@ -302,7 +351,7 @@ function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysi
     email,
     phone,
     location,
-    currentRole,
+    currentRole: splitRoleLine(currentRoleLine ?? '').title || targetRole || '',
     summary: cleanSummary(summary) || cleanSummary(cvText).slice(0, 500),
     experiences,
     education,
@@ -342,10 +391,16 @@ function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysi
 }
 
 function mergeWithSectionParse(ai: CvAiAnalysis, parsed: CvAiAnalysis): CvAiAnalysis {
-  const fullName = cleanName(parsed.fullName) || cleanName(ai.fullName);
-  const currentRole = parsed.currentRole || ai.currentRole;
-  const summary = parsed.summary || cleanIdentitySummary(ai.summary, fullName, currentRole);
-  const experiences = parsed.experiences.length ? parsed.experiences : ai.experiences.filter(isValidExperience);
+  const aiName = cleanName(ai.fullName);
+  const parsedName = cleanName(parsed.fullName);
+  const fullName = looksLikePersonName(aiName) ? aiName : parsedName;
+  const currentRole = ai.currentRole || parsed.currentRole;
+  const summary =
+    cleanIdentitySummary(ai.summary, fullName, currentRole) ||
+    cleanIdentitySummary(parsed.summary, fullName, currentRole);
+  const aiExperiences = ai.experiences.map(normalizeExperienceFields).filter(isValidExperience);
+  const parsedExperiences = parsed.experiences.map(normalizeExperienceFields).filter(isValidExperience);
+  const experiences = aiExperiences.length ? aiExperiences : parsedExperiences;
 
   return {
     ...ai,
@@ -366,7 +421,7 @@ function asArray<T>(value: unknown): T[] {
 }
 
 function asString(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
+  return typeof value === 'string' ? repairExtractedTextArtifacts(value).trim() : '';
 }
 
 function asScore(value: unknown) {
@@ -390,6 +445,20 @@ export function normalizeCvAnalysis(value: Record<string, unknown>): CvAiAnalysi
     }))
     .filter((item) => isLikelySkill(item.name));
 
+  const experiences = asArray<Record<string, unknown>>(value.experiences)
+    .map((item) =>
+      normalizeExperienceFields({
+        company: asString(item.company),
+        title: asString(item.title),
+        startDate: asString(item.startDate),
+        endDate: asString(item.endDate),
+        responsibilities: asArray<string>(item.responsibilities).map(asString).filter(Boolean),
+        achievements: asArray<string>(item.achievements).map(asString).filter(Boolean),
+        skills: asArray<string>(item.skills).map(asString).filter(Boolean),
+      })
+    )
+    .filter(isValidExperience);
+
   return {
     ...emptyAnalysis,
     fullName: asString(value.fullName),
@@ -398,7 +467,7 @@ export function normalizeCvAnalysis(value: Record<string, unknown>): CvAiAnalysi
     location: asString(value.location),
     currentRole: asString(value.currentRole),
     summary: cleanSummary(asString(value.summary)),
-    experiences: asArray(value.experiences),
+    experiences,
     education: asArray(value.education),
     skills,
     certifications: asArray(value.certifications),
@@ -416,7 +485,8 @@ export function normalizeCvAnalysis(value: Record<string, unknown>): CvAiAnalysi
 }
 
 export async function analyzeCvWithAi(cvText: string, targetRole?: string): Promise<CvAiAnalysis> {
-  const fallback = parseFallbackAnalysis(cvText, targetRole);
+  const preparedText = prepareCvText(cvText);
+  const fallback = parseFallbackAnalysis(preparedText, targetRole);
 
   const raw = await chatCompletionJson(
     [
@@ -443,6 +513,16 @@ export async function analyzeCvWithAi(cvText: string, targetRole?: string): Prom
   "jobRoleFit": object
 }
 Use empty strings or empty arrays when unknown. Score is 0-100.
+Critical extraction rules:
+- If a role has Present, Current, Now, or an open-ended date range, that is the current employment.
+- currentRole must be the title of the current/present role only.
+- For each experience, title must contain only the job title. Do not include dates in title.
+- For each experience, company must contain only the employer/company name. Do not put Present, dates, or responsibilities in company.
+- For each experience, startDate and endDate must be separated. Keep "Present" as endDate for current jobs.
+- If the PDF text merges words like "React Native DeveloperAug 2024 Present", split it into title "React Native Developer", startDate "Aug 2024", endDate "Present".
+- Correct obvious PDF/OCR extraction mistakes in common technical terms, for example "React NaOve" or "React Na(ve" should be "React Native".
+- summary must be a clean professional paragraph only. Do not include name, email, phone, LinkedIn, portfolio URL, or repeated job title in summary.
+- Do not duplicate the current/present role as a separate past role.
 Make the analysis practical and specific:
 - strengths must explain what is already working in the CV
 - weaknesses must explain what is hurting the CV
@@ -456,7 +536,7 @@ Make the analysis practical and specific:
 
 CV text:
 ---
-${cvText.slice(0, 28_000)}
+${preparedText.slice(0, 28_000)}
 ---`,
       },
     ],

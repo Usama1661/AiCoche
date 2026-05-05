@@ -47,7 +47,32 @@ function usefulName(value: string) {
 }
 
 function isCurrentExperience(item: ProfessionalExperience) {
-  return /present|current|now/i.test(item.endDate);
+  return /present|current|now/i.test([item.endDate, item.company, item.title].join(' '));
+}
+
+const dateRangePattern = /((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})\s*(?:[–-]\s*)?((?:present|current|now)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})/i;
+const dateStartPattern = /((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})/i;
+
+function normalizeExperienceForDisplay(item: ProfessionalExperience): ProfessionalExperience {
+  const combined = [item.title, item.company, item.startDate, item.endDate].filter(Boolean).join(' ');
+  const range = combined.match(dateRangePattern);
+  const startOnly = item.title.match(dateStartPattern);
+  const companyLooksLikeEndDate = /^(present|current|now)$/i.test(item.company.trim());
+  const startDate = item.startDate || range?.[1] || startOnly?.[1] || '';
+  const endDate = item.endDate || range?.[2] || (companyLooksLikeEndDate ? item.company : '');
+  const cleanTitle = item.title
+    .replace(dateRangePattern, '')
+    .replace(dateStartPattern, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return {
+    ...item,
+    title: cleanTitle || item.title,
+    company: companyLooksLikeEndDate ? '' : item.company,
+    startDate,
+    endDate,
+  };
 }
 
 function emptyExperience(): ProfessionalExperience {
@@ -98,8 +123,9 @@ export default function ProfessionalProfileScreen() {
     profile.certifications.length > 0;
 
   const visibleName = usefulName(profile.fullName) || usefulName(displayName) || 'Your Name';
-  const currentExperience = profile.experiences.find(isCurrentExperience);
-  const pastExperiences = profile.experiences.filter((item) => !isCurrentExperience(item));
+  const displayExperiences = profile.experiences.map(normalizeExperienceForDisplay);
+  const currentExperience = displayExperiences.find(isCurrentExperience);
+  const pastExperiences = displayExperiences.filter((item) => !isCurrentExperience(item));
   const visibleHeadline =
     profile.source === 'resume'
       ? currentExperience?.title ||
