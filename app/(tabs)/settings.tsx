@@ -86,29 +86,19 @@ export default function SettingsScreen() {
           icon="shield-checkmark-outline"
           label="Privacy & Security"
           color={colors.success}
-          onPress={() =>
-            Alert.alert(
-              'Privacy & Security',
-              'AiCoche stores your profile and CV data to power personalized coaching. You control your account data from this screen.'
-            )
-          }
+          onPress={() => router.push('/privacy-security' as never)}
         />
         <SettingsRow
           icon="document-text-outline"
           label="Privacy Policy"
           color={colors.info}
-          onPress={() =>
-            Alert.alert(
-              'Privacy Policy',
-              'We use your profile, CV, quiz, and interview data to personalize coaching inside AiCoche. We do not sell your data. Account deletion will be completed once the secure backend deletion endpoint is connected.'
-            )
-          }
+          onPress={() => router.push('/privacy-policy' as never)}
         />
         <SettingsRow
           icon="help-circle-outline"
           label="Help & Support"
           color={colors.accentGold}
-          onPress={() => Alert.alert('Help & Support', 'Support options are coming soon.')}
+          onPress={() => router.push('/help-support' as never)}
         />
         <SettingsRow
           icon="log-out-outline"

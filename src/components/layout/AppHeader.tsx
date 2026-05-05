@@ -14,7 +14,7 @@ type Props = {
 };
 
 export function AppHeader({ title, subtitle, onBack, right }: Props) {
-  const { colors, toggle, isDark } = useAppTheme();
+  const { colors } = useAppTheme();
   return (
     <View style={styles.row}>
       <View style={styles.left}>
@@ -34,17 +34,6 @@ export function AppHeader({ title, subtitle, onBack, right }: Props) {
       </View>
       <View style={styles.right}>
         {right}
-        <Pressable
-          onPress={toggle}
-          hitSlop={8}
-          accessibilityLabel="Toggle theme"
-          accessibilityRole="button">
-          <Ionicons
-            name={isDark ? 'sunny-outline' : 'moon-outline'}
-            size={22}
-            color={colors.textMuted}
-          />
-        </Pressable>
       </View>
     </View>
   );
