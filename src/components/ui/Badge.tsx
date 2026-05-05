@@ -12,11 +12,11 @@ export function Badge({ label, tone = 'neutral' }: Props) {
   const { colors } = useAppTheme();
   const bg =
     tone === 'success'
-      ? 'rgba(34, 197, 94, 0.15)'
+      ? colors.successTint
       : tone === 'error'
-        ? 'rgba(239, 68, 68, 0.15)'
+        ? colors.errorTint
         : tone === 'primary'
-          ? 'rgba(79, 70, 229, 0.2)'
+          ? colors.primaryTint
           : colors.surface;
   const fg =
     tone === 'success'

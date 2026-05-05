@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { AppText } from '@/src/components/ui/AppText';
 import { Screen } from '@/src/components/ui/Screen';
@@ -8,7 +9,7 @@ import { useMetricsStore } from '@/src/store/metricsStore';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useUsageStore, FREE_CHAT_LIMIT } from '@/src/store/usageStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
-import { spacing } from '@/src/theme/tokens';
+import { gradients, spacing } from '@/src/theme/tokens';
 
 export default function InterviewTabScreen() {
   const router = useRouter();
@@ -30,14 +31,20 @@ export default function InterviewTabScreen() {
       <Pressable
         onPress={() => router.push('/interview-session')}
         style={({ pressed }) => [styles.hero, { opacity: pressed ? 0.9 : 1 }]}>
-        <View style={styles.heroIcon}>
-          <Ionicons name="chatbubble-outline" size={38} color="#FFFFFF" />
+        <LinearGradient
+          colors={gradients.primary}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={[styles.heroIcon, { backgroundColor: colors.primaryTint }]}>
+          <Ionicons name="chatbubble-outline" size={38} color={colors.textInverse} />
         </View>
         <View style={{ flex: 1 }}>
-          <AppText variant="subtitle" style={styles.heroTitle}>
+          <AppText variant="subtitle" style={[styles.heroTitle, { color: colors.textInverse }]}>
             Start New Interview
           </AppText>
-          <AppText variant="body" style={styles.heroText} numberOfLines={1}>
+          <AppText variant="body" style={[styles.heroText, { color: colors.text }]} numberOfLines={1}>
             AI-powered {professionLabel || 'career'} interview
           </AppText>
         </View>
@@ -52,7 +59,7 @@ export default function InterviewTabScreen() {
         </AppText>
       </View>
       <View style={[styles.track, { backgroundColor: colors.border }]}>
-        <View style={[styles.fill, { width: `${progress * 100}%` }]} />
+        <View style={[styles.fill, { width: `${progress * 100}%`, backgroundColor: colors.primary }]} />
       </View>
 
       <AppText variant="title" style={styles.sectionTitle}>
@@ -76,7 +83,7 @@ function PastSession({ title, score }: { title: string; score: number }) {
         styles.session,
         { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.9 : 1 },
       ]}>
-      <View style={styles.sessionIcon}>
+      <View style={[styles.sessionIcon, { backgroundColor: colors.primaryTint }]}>
         <Ionicons name="time-outline" size={24} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
@@ -85,7 +92,7 @@ function PastSession({ title, score }: { title: string; score: number }) {
           Latest session
         </AppText>
       </View>
-      <View style={styles.scorePill}>
+      <View style={[styles.scorePill, { backgroundColor: colors.successTint }]}>
         <Ionicons name="trophy-outline" size={16} color={colors.success} />
         <AppText variant="caption" style={{ color: colors.success, fontWeight: '900' }}>
           {score}
@@ -114,7 +121,7 @@ const styles = StyleSheet.create({
   hero: {
     minHeight: 120,
     borderRadius: 22,
-    backgroundColor: '#5548F3',
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.lg,
@@ -125,12 +132,11 @@ const styles = StyleSheet.create({
     width: 62,
     height: 62,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heroTitle: { color: '#FFFFFF', marginBottom: spacing.xs },
-  heroText: { color: 'rgba(255,255,255,0.85)', fontWeight: '800' },
+  heroTitle: { marginBottom: spacing.xs },
+  heroText: { fontWeight: '800' },
   usageRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -140,7 +146,7 @@ const styles = StyleSheet.create({
   usageText: { fontWeight: '800' },
   usageValue: { fontWeight: '900' },
   track: { height: 8, borderRadius: 99, overflow: 'hidden', marginBottom: spacing.xxl },
-  fill: { height: '100%', borderRadius: 99, backgroundColor: '#5548F3' },
+  fill: { height: '100%', borderRadius: 99 },
   sectionTitle: { marginBottom: spacing.lg },
   session: {
     minHeight: 88,
@@ -156,7 +162,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 14,
-    backgroundColor: 'rgba(79,70,229,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -164,7 +169,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    backgroundColor: 'rgba(34,197,94,0.12)',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,

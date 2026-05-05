@@ -82,7 +82,12 @@ export default function OnboardingScreen() {
     <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
       <View style={styles.inner}>
         <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
-          <View style={[styles.progressFill, { width: `${((step + 1) / 4) * 100}%` }]} />
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${((step + 1) / 4) * 100}%`, backgroundColor: colors.primary },
+            ]}
+          />
         </View>
         <AppText variant="body" muted style={styles.stepLabel}>
           Step {step + 1} of 4
@@ -197,7 +202,7 @@ export default function OnboardingScreen() {
           onPress={next}
           disabled={!canContinue}
           style={styles.continueBtn}
-          leftIcon={<Ionicons name="chevron-forward" size={22} color="#FFFFFF" />}
+          leftIcon={<Ionicons name="chevron-forward" size={22} color={colors.textInverse} />}
         />
       </View>
     </SafeAreaView>
@@ -224,7 +229,7 @@ function ChoiceRow({
       style={({ pressed }) => [
         styles.choice,
         {
-          backgroundColor: selected ? 'rgba(79,70,229,0.14)' : colors.surface,
+          backgroundColor: selected ? colors.primaryTint : colors.surface,
           borderColor: selected ? colors.primary : colors.border,
           opacity: pressed ? 0.88 : 1,
         },
@@ -239,7 +244,7 @@ function ChoiceRow({
       ) : null}
       {showCheck && selected ? (
         <View style={[styles.check, { backgroundColor: colors.primary }]}>
-          <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+          <Ionicons name="checkmark" size={18} color={colors.textInverse} />
         </View>
       ) : null}
     </Pressable>
@@ -264,7 +269,7 @@ function GoalCard({
       style={({ pressed }) => [
         styles.goalCard,
         {
-          backgroundColor: selected ? 'rgba(79,70,229,0.14)' : colors.surface,
+          backgroundColor: selected ? colors.primaryTint : colors.surface,
           borderColor: selected ? colors.primary : colors.border,
           opacity: pressed ? 0.88 : 1,
         },
@@ -293,7 +298,6 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     borderRadius: 99,
-    backgroundColor: '#5548F3',
   },
   stepLabel: { fontWeight: '900', marginBottom: spacing.lg },
   title: { marginBottom: spacing.md },

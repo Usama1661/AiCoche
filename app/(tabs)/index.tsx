@@ -35,7 +35,7 @@ export default function HomeScreen() {
         </View>
         <Pressable
           onPress={() => setUpgradeOpen(true)}
-          style={[styles.planPill, { backgroundColor: 'rgba(79,70,229,0.16)' }]}>
+          style={[styles.planPill, { backgroundColor: colors.primaryTint }]}>
           <Ionicons name="sparkles-outline" size={18} color={colors.primary} />
           <AppText variant="caption" style={{ color: colors.primary, fontWeight: '900' }}>
             {plan === 'pro' ? 'Pro' : 'Free'}
@@ -60,7 +60,7 @@ export default function HomeScreen() {
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
         <ScoreBlock
           icon="school-outline"
-          tint="#F59E0B"
+          tint={colors.accentGold}
           value={lastQuizScore != null ? `${lastQuizScore}%` : '—'}
           label={lastQuizLevel ?? 'AI Quiz'}
         />
@@ -95,21 +95,21 @@ export default function HomeScreen() {
           title="Start Interview"
           subtitle="Practice with AI"
           icon="chatbubble-outline"
-          color="#F59E0B"
+          color={colors.accentGold}
           onPress={() => router.push('/interview-session')}
         />
         <ActionCard
           title="AI Quiz"
           subtitle="Check your level"
           icon="school-outline"
-          color="#8B5CF6"
+          color={colors.primaryLight}
           onPress={() => router.push('/(tabs)/quiz')}
         />
         <ActionCard
           title="Your Profile"
           subtitle="Career snapshot"
           icon="person-circle-outline"
-          color="#0EA5E9"
+          color={colors.info}
           onPress={() => router.push('/professional-profile' as never)}
         />
         <ActionCard
@@ -121,7 +121,7 @@ export default function HomeScreen() {
         />
       </View>
 
-      <View style={[styles.tipCard, { borderColor: 'rgba(79,70,229,0.35)' }]}>
+      <View style={[styles.tipCard, { borderColor: colors.glow, backgroundColor: colors.userBubble }]}>
         <Ionicons name="sparkles-outline" size={24} color={colors.primary} />
         <View style={{ flex: 1 }}>
           <AppText variant="subtitle">Daily Tip</AppText>
@@ -263,7 +263,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 20,
     padding: spacing.xl,
-    backgroundColor: 'rgba(49,46,129,0.24)',
     flexDirection: 'row',
     gap: spacing.md,
     marginBottom: spacing.xxl,

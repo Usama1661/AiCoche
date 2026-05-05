@@ -51,11 +51,14 @@ export function FormInput({
           {
             backgroundColor: colors.surface,
             borderColor: error ? colors.error : focused ? colors.primary : colors.border,
+            shadowColor: focused ? colors.primary : 'transparent',
+            shadowOpacity: focused ? 0.25 : 0,
+            shadowRadius: focused ? 12 : 0,
           },
         ]}>
         {leftIcon ? <View style={styles.iconSlot}>{leftIcon}</View> : null}
         <TextInput
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.textSecondary}
           selectionColor={colors.primary}
           {...rest}
           onFocus={(e) => {
@@ -87,9 +90,9 @@ const styles = StyleSheet.create({
   wrap: { gap: spacing.xs },
   label: { marginBottom: 6, fontWeight: '800' },
   inputShell: {
-    minHeight: 66,
+    minHeight: 56,
     borderWidth: 1,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     paddingHorizontal: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',

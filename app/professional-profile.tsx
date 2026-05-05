@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { AppHeader } from '@/src/components/layout/AppHeader';
 import { AppText } from '@/src/components/ui/AppText';
@@ -11,7 +12,7 @@ import { Screen } from '@/src/components/ui/Screen';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
-import { spacing } from '@/src/theme/tokens';
+import { gradients, spacing } from '@/src/theme/tokens';
 import type { Certification, ProfessionalEducation, ProfessionalExperience, ProfessionalProfile } from '@/src/types/user';
 
 function makeId(prefix: string) {
@@ -150,7 +151,7 @@ export default function ProfessionalProfileScreen() {
                 setEditing(false);
               }}
               hitSlop={8}>
-              <AppText variant="caption" style={{ color: colors.textMuted, fontWeight: '900' }}>
+              <AppText variant="caption" style={{ color: colors.textSecondary, fontWeight: '900' }}>
                 Cancel
               </AppText>
             </Pressable>
@@ -164,7 +165,7 @@ export default function ProfessionalProfileScreen() {
 
       {!hasProfile ? (
         <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={[styles.emptyIcon, { backgroundColor: `${colors.primary}18` }]}>
+          <View style={[styles.emptyIcon, { backgroundColor: colors.primaryTint }]}>
             <Ionicons name="id-card-outline" size={34} color={colors.primary} />
           </View>
           <AppText variant="title" style={{ textAlign: 'center' }}>
@@ -182,8 +183,8 @@ export default function ProfessionalProfileScreen() {
       ) : null}
 
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={styles.cover} />
-        <View style={[styles.avatar, { borderColor: colors.card }]}>
+        <LinearGradient colors={gradients.hero} style={styles.cover} />
+        <View style={[styles.avatar, { borderColor: colors.card, backgroundColor: colors.primaryTint }]}>
           {avatarUrl ? (
             <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
           ) : (
@@ -212,7 +213,7 @@ export default function ProfessionalProfileScreen() {
               </View>
             </>
           )}
-          <View style={[styles.sourcePill, { backgroundColor: `${colors.primary}18` }]}>
+          <View style={[styles.sourcePill, { backgroundColor: colors.primaryTint }]}>
             <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
             <AppText variant="caption" style={{ color: colors.primary, fontWeight: '900' }}>
               {profile.source === 'resume' ? 'Auto-filled from CV' : 'Editable profile'}
@@ -622,7 +623,7 @@ function ChipGroup({ title, items }: { title: string; items: string[] }) {
       <View style={styles.chips}>
         {items.length ? (
           items.map((item) => (
-            <View key={item} style={[styles.chip, { backgroundColor: `${colors.primary}14` }]}>
+            <View key={item} style={[styles.chip, { backgroundColor: colors.primaryTint }]}>
               <AppText variant="caption" style={{ color: colors.primary, fontWeight: '900' }}>
                 {item}
               </AppText>
@@ -668,14 +669,12 @@ const styles = StyleSheet.create({
   },
   cover: {
     height: 92,
-    backgroundColor: '#1D4ED8',
   },
   avatar: {
     width: 86,
     height: 86,
     borderRadius: 24,
     borderWidth: 4,
-    backgroundColor: 'rgba(79,70,229,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: -43,

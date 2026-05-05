@@ -34,7 +34,7 @@ export function ChatInput({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.textSecondary}
         multiline
         editable={!disabled}
       />
@@ -47,7 +47,7 @@ export function ChatInput({
         ]}
         accessibilityLabel="Send message"
         accessibilityRole="button">
-        <Ionicons name="send" size={20} color="#fff" />
+        <Ionicons name="send" size={20} color={colors.textInverse} />
       </Pressable>
     </View>
   );

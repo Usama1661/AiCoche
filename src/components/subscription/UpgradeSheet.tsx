@@ -17,7 +17,7 @@ export function UpgradeSheet({ visible, onClose }: Props) {
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose}>
         <Pressable
           style={[styles.sheet, { backgroundColor: colors.surface }]}
           onPress={(e) => e.stopPropagation()}>
@@ -51,7 +51,6 @@ export function UpgradeSheet({ visible, onClose }: Props) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     padding: spacing.lg,
   },

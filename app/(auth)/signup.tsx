@@ -63,7 +63,7 @@ export default function SignupScreen() {
 
   return (
     <Screen scroll keyboard contentContainerStyle={styles.container}>
-      <View style={[styles.logo, { backgroundColor: 'rgba(79,70,229,0.16)' }]}>
+      <View style={[styles.logo, { backgroundColor: colors.primaryTint }]}>
         <Ionicons name="briefcase-outline" size={44} color={colors.primary} />
       </View>
       <AppText variant="display" style={styles.title}>
@@ -110,7 +110,7 @@ export default function SignupScreen() {
         disabled={!canSubmit || loading}
         loading={loading}
         style={styles.mainButton}
-        leftIcon={<Ionicons name="arrow-forward-outline" size={22} color="#FFFFFF" />}
+        leftIcon={<Ionicons name="arrow-forward-outline" size={22} color={colors.textInverse} />}
       />
 
       <View style={styles.orRow}>
@@ -124,8 +124,8 @@ export default function SignupScreen() {
       <Pressable
         style={[styles.google, { borderColor: colors.border, backgroundColor: colors.surface }]}
         onPress={() => Alert.alert('Google sign-up', 'Coming soon')}>
-        <View style={styles.googleDot}>
-          <AppText variant="caption" style={{ color: '#FFFFFF', fontWeight: '900' }}>
+        <View style={[styles.googleDot, { backgroundColor: colors.error }]}>
+          <AppText variant="caption" style={{ color: colors.textInverse, fontWeight: '900' }}>
             G
           </AppText>
         </View>
@@ -186,7 +186,6 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: '#EF4444',
     alignItems: 'center',
     justifyContent: 'center',
   },

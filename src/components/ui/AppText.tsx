@@ -21,7 +21,7 @@ export function AppText({
 }: Props) {
   const { colors } = useAppTheme();
   const base = typography[variant];
-  const textColor = color ?? (muted ? colors.textMuted : colors.text);
+  const textColor = color ?? (muted ? colors.textSecondary : colors.text);
   return (
     <Text
       {...rest}

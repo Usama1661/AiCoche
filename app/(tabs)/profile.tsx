@@ -188,14 +188,17 @@ export default function ProfileScreen() {
       </View>
 
       <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Pressable onPress={pickAvatar} disabled={uploadingAvatar} style={styles.avatar}>
+        <Pressable
+          onPress={pickAvatar}
+          disabled={uploadingAvatar}
+          style={[styles.avatar, { backgroundColor: colors.primaryTint }]}>
           {avatarUrl ? (
             <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
           ) : (
             <Ionicons name="person-outline" size={46} color={colors.primary} />
           )}
           <View style={[styles.avatarBadge, { backgroundColor: colors.primary }]}>
-            <Ionicons name={uploadingAvatar ? 'hourglass-outline' : 'camera-outline'} size={15} color="#FFFFFF" />
+            <Ionicons name={uploadingAvatar ? 'hourglass-outline' : 'camera-outline'} size={15} color={colors.textInverse} />
           </View>
         </Pressable>
         <View style={{ flex: 1 }}>
@@ -203,7 +206,7 @@ export default function ProfileScreen() {
           <AppText variant="body" muted style={{ fontWeight: '800', marginVertical: 2 }}>
             {email || 'No email'}
           </AppText>
-          <View style={styles.rolePill}>
+          <View style={[styles.rolePill, { backgroundColor: colors.primaryTint }]}>
             <Ionicons name="briefcase-outline" size={14} color={colors.primary} />
             <AppText variant="caption" style={{ color: colors.primary, fontWeight: '900' }}>
               {usefulProfileText(professionLabel) || usefulProfileText(professionalProfile.currentDesignation) || 'Profession not set'}
@@ -218,11 +221,11 @@ export default function ProfileScreen() {
       <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <InfoRow icon="trending-up-outline" color={colors.primary} label="Experience" value={labelExperience(experience ?? '')} />
         <InfoRow icon="ribbon-outline" color={colors.success} label="Career Goal" value={labelGoal(goal ?? '')} />
-        <InfoRow icon="globe-outline" color="#F59E0B" label="Language" value={language || 'English'} />
+        <InfoRow icon="globe-outline" color={colors.accentGold} label="Language" value={language || 'English'} />
       </View>
 
       <View style={[styles.planCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={styles.planIcon}>
+        <View style={[styles.planIcon, { backgroundColor: colors.primaryTint }]}>
           <Ionicons name="flash-outline" size={28} color={colors.primary} />
         </View>
         <View style={{ flex: 1 }}>
@@ -233,7 +236,7 @@ export default function ProfileScreen() {
         </View>
         <Button
           title="Upgrade to Pro"
-          leftIcon={<Ionicons name="diamond-outline" size={18} color="#FFFFFF" />}
+          leftIcon={<Ionicons name="diamond-outline" size={18} color={colors.textInverse} />}
           onPress={() => setPlan('pro')}
           style={styles.upgradeButton}
         />
@@ -270,7 +273,7 @@ export default function ProfileScreen() {
       </View>
 
       <Modal visible={modal != null} transparent animationType="fade">
-        <Pressable style={styles.modalBackdrop} onPress={() => setModal(null)}>
+        <Pressable style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]} onPress={() => setModal(null)}>
           <Pressable
             style={[styles.modalSheet, { backgroundColor: colors.surface }]}
             onPress={(e) => e.stopPropagation()}>
@@ -298,7 +301,7 @@ export default function ProfileScreen() {
       </Modal>
 
       <Modal visible={editOpen} transparent animationType="fade">
-        <Pressable style={styles.modalBackdrop} onPress={() => setEditOpen(false)}>
+        <Pressable style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]} onPress={() => setEditOpen(false)}>
           <Pressable
             style={[styles.modalSheet, { backgroundColor: colors.surface }]}
             onPress={(e) => e.stopPropagation()}>
@@ -451,7 +454,6 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 22,
-    backgroundColor: 'rgba(79,70,229,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -475,7 +477,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: 12,
-    backgroundColor: 'rgba(79,70,229,0.16)',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
@@ -498,7 +499,6 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 16,
-    backgroundColor: 'rgba(79,70,229,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.md,
@@ -534,7 +534,6 @@ const styles = StyleSheet.create({
   usageRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     padding: spacing.lg,
   },

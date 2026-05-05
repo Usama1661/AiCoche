@@ -8,9 +8,10 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 
 import { useAppTheme } from '@/src/theme/ThemeProvider';
-import { spacing } from '@/src/theme/tokens';
+import { motion, spacing } from '@/src/theme/tokens';
 
 type Props = {
   children: ReactNode;
@@ -28,6 +29,13 @@ export function Screen({
   keyboard,
 }: Props) {
   const { colors } = useAppTheme();
+  const animatedContent = (
+    <Animated.View
+      entering={FadeInUp.duration(motion.entranceDuration)}
+      style={scroll ? styles.animatedScrollContent : styles.fill}>
+      {children}
+    </Animated.View>
+  );
   const inner = scroll ? (
     <ScrollView
       keyboardShouldPersistTaps="handled"
@@ -37,11 +45,11 @@ export function Screen({
         contentContainerStyle,
       ]}
       showsVerticalScrollIndicator={false}>
-      {children}
+      {animatedContent}
     </ScrollView>
   ) : (
     <View style={[styles.fill, { backgroundColor: colors.background }]}>
-      {children}
+      {animatedContent}
     </View>
   );
 
@@ -73,4 +81,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingBottom: spacing.xxl,
   },
+  animatedScrollContent: { flexGrow: 1 },
 });

@@ -206,10 +206,10 @@ export default function AiQuizScreen() {
         </View>
 
         <View style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.resultIcon}>
-            <Ionicons name="trophy-outline" size={40} color="#FFFFFF" />
+          <View style={[styles.resultIcon, { backgroundColor: colors.primary }]}>
+            <Ionicons name="trophy-outline" size={40} color={colors.textInverse} />
           </View>
-          <AppText variant="display" style={styles.resultScore}>
+          <AppText variant="display" style={{ color: colors.accentGold }}>
             {result.score}%
           </AppText>
           <AppText variant="title">{result.level} Level</AppText>
@@ -283,7 +283,7 @@ export default function AiQuizScreen() {
 
       <View style={[styles.quizCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.quizHead}>
-          <View style={[styles.badge, { backgroundColor: 'rgba(79,70,229,0.16)' }]}>
+          <View style={[styles.badge, { backgroundColor: colors.primaryTint }]}>
             <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
             <AppText variant="caption" style={{ color: colors.primary, fontWeight: '900' }}>
               AI Question
@@ -308,7 +308,7 @@ export default function AiQuizScreen() {
                 style={({ pressed }) => [
                   styles.option,
                   {
-                    backgroundColor: selected ? 'rgba(79,70,229,0.16)' : colors.background,
+                    backgroundColor: selected ? colors.primaryTint : colors.background,
                     borderColor: selected ? colors.primary : colors.border,
                     opacity: pressed ? 0.88 : 1,
                   },
@@ -319,7 +319,7 @@ export default function AiQuizScreen() {
                     { borderColor: selected ? colors.primary : colors.textMuted },
                     selected && { backgroundColor: colors.primary },
                   ]}>
-                  {selected ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
+                  {selected ? <Ionicons name="checkmark" size={14} color={colors.textInverse} /> : null}
                 </View>
                 <AppText variant="body" style={styles.optionText}>
                   {option}
@@ -407,12 +407,10 @@ const styles = StyleSheet.create({
     width: 82,
     height: 82,
     borderRadius: 24,
-    backgroundColor: '#5548F3',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.lg,
   },
-  resultScore: { color: '#F59E0B' },
   resultText: {
     textAlign: 'center',
     marginTop: spacing.md,

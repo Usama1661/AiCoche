@@ -25,7 +25,7 @@ export function Card({ children, onPress, style, padded = true }: Props) {
       backgroundColor: colors.card,
       borderColor: colors.border,
     },
-    cardShadow(colors.background),
+    cardShadow(colors.glow),
     padded ? { padding: spacing.lg } : null,
     style,
   ].filter(Boolean) as ViewStyle[];
@@ -46,7 +46,7 @@ export function Card({ children, onPress, style, padded = true }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: radii.lg,
+    borderRadius: radii.xl,
     borderWidth: 1,
   },
 });

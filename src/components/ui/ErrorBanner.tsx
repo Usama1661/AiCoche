@@ -13,7 +13,7 @@ export function ErrorBanner({ message }: Props) {
     <View
       style={[
         styles.box,
-        { backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: colors.error },
+        { backgroundColor: colors.errorTint, borderColor: colors.error },
       ]}>
       <Ionicons name="warning-outline" size={18} color={colors.error} />
       <AppText variant="caption" style={{ color: colors.error, flex: 1 }}>

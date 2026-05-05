@@ -15,59 +15,90 @@ export const radii = {
   md: 14,
   lg: 16,
   xl: 20,
+  xxl: 22,
   pill: 999,
 } as const;
 
 export type ColorPalette = {
   background: string;
   surface: string;
+  elevated: string;
   card: string;
   border: string;
+  borderMuted: string;
   text: string;
+  textSecondary: string;
   textMuted: string;
   textInverse: string;
   primary: string;
+  primaryDark: string;
+  primaryLight: string;
   primaryMuted: string;
+  secondaryPink: string;
+  accentGold: string;
   success: string;
+  warning: string;
   error: string;
+  info: string;
   overlay: string;
   aiBubble: string;
   userBubble: string;
+  glow: string;
+  primaryTint: string;
+  successTint: string;
+  warningTint: string;
+  errorTint: string;
+  infoTint: string;
+  mutedTint: string;
 };
 
 export const darkColors: ColorPalette = {
-  background: '#0B1220',
-  surface: '#1B2638',
-  card: '#1B2638',
-  border: '#334155',
-  text: '#F1F5F9',
-  textMuted: '#9AA7BA',
-  textInverse: '#0F172A',
-  primary: '#4F46E5',
-  primaryMuted: '#6366F1',
-  success: '#22C55E',
-  error: '#EF4444',
-  overlay: 'rgba(15, 23, 42, 0.85)',
-  aiBubble: '#334155',
-  userBubble: '#312E81',
+  background: '#0A0A14',
+  surface: '#1A1A2A',
+  elevated: '#1A1A2A',
+  card: '#13131F',
+  border: '#1E1E2E',
+  borderMuted: '#2A2A3A',
+  text: '#F0F0F5',
+  textSecondary: '#9898AC',
+  textMuted: '#5C5C72',
+  textInverse: '#FFFFFF',
+  primary: '#B266FF',
+  primaryDark: '#7C3AED',
+  primaryLight: '#D4A0FF',
+  primaryMuted: '#8B5CF6',
+  secondaryPink: '#FF6B9D',
+  accentGold: '#FBBF24',
+  success: '#4ADE80',
+  warning: '#FBBF24',
+  error: '#F87171',
+  info: '#60A5FA',
+  overlay: 'rgba(10, 10, 20, 0.82)',
+  aiBubble: '#1A1A2A',
+  userBubble: '#1E1235',
+  glow: 'rgba(178, 102, 255, 0.35)',
+  primaryTint: 'rgba(178, 102, 255, 0.16)',
+  successTint: 'rgba(74, 222, 128, 0.14)',
+  warningTint: 'rgba(251, 191, 36, 0.14)',
+  errorTint: 'rgba(248, 113, 113, 0.14)',
+  infoTint: 'rgba(96, 165, 250, 0.14)',
+  mutedTint: 'rgba(92, 92, 114, 0.18)',
 };
 
-export const lightColors: ColorPalette = {
-  background: '#F8FAFC',
-  surface: '#FFFFFF',
-  card: '#FFFFFF',
-  border: '#E2E8F0',
-  text: '#0F172A',
-  textMuted: '#64748B',
-  textInverse: '#F8FAFC',
-  primary: '#4F46E5',
-  primaryMuted: '#6366F1',
-  success: '#16A34A',
-  error: '#DC2626',
-  overlay: 'rgba(248, 250, 252, 0.92)',
-  aiBubble: '#E2E8F0',
-  userBubble: '#C7D2FE',
-};
+export const lightColors: ColorPalette = darkColors;
+
+export const gradients = {
+  primary: ['#7C3AED', '#B266FF'] as const,
+  hero: ['#1E1235', '#15102A', '#13131F'] as const,
+  purpleGlow: ['#7C3AED', '#B266FF', '#FF6B9D'] as const,
+  surface: ['#1A1A2A', '#13131F'] as const,
+} as const;
+
+export const motion = {
+  entranceDuration: 480,
+  entranceSlideY: 22,
+  pressScale: 0.98,
+} as const;
 
 export const typography = {
   display: {
@@ -106,13 +137,13 @@ export const typography = {
 export function cardShadow(color: string): ViewStyle {
   return Platform.select({
     ios: {
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.12,
-      shadowRadius: 12,
+      shadowColor: color,
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.18,
+      shadowRadius: 24,
     },
     android: {
-      elevation: 4,
+      elevation: 3,
     },
     default: {},
   }) as ViewStyle;

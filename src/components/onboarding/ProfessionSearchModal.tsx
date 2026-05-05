@@ -33,7 +33,7 @@ export function ProfessionSearchModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, { backgroundColor: colors.overlay }]}>
         <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
           <AppText variant="title" style={{ marginBottom: spacing.md }}>
             Select profession
@@ -67,7 +67,7 @@ export function ProfessionSearchModal({
                 style={[
                   styles.row,
                   current?.key === item.key && {
-                    backgroundColor: 'rgba(79, 70, 229, 0.12)',
+                    backgroundColor: colors.primaryTint,
                   },
                 ]}>
                 <AppText variant="body">{item.label}</AppText>
@@ -84,7 +84,6 @@ export function ProfessionSearchModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   sheet: {

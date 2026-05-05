@@ -32,7 +32,7 @@ export function LockedSection({
         intensity={isDark ? 45 : 65}
         tint={isDark ? 'dark' : 'light'}
         style={StyleSheet.absoluteFill}>
-        <Pressable style={styles.overlay} onPress={onUpgrade}>
+        <Pressable style={[styles.overlay, { backgroundColor: colors.overlay }]} onPress={onUpgrade}>
           <AppText variant="subtitle" style={{ color: colors.text }}>
             {title}
           </AppText>
@@ -40,7 +40,7 @@ export function LockedSection({
             Upgrade to unlock downloads and unlimited usage.
           </AppText>
           <View style={[styles.cta, { backgroundColor: colors.primary }]}>
-            <AppText variant="caption" style={{ color: '#fff', fontWeight: '700' }}>
+            <AppText variant="caption" style={{ color: colors.textInverse, fontWeight: '700' }}>
               Upgrade to Pro
             </AppText>
           </View>
@@ -57,7 +57,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing.lg,
-    backgroundColor: 'rgba(15,23,42,0.35)',
   },
   cta: {
     marginTop: spacing.md,
