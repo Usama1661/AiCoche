@@ -271,60 +271,72 @@ alter table public.interview_sessions enable row level security;
 alter table public.quiz_sessions enable row level security;
 alter table public.subscriptions enable row level security;
 
+drop policy if exists "profiles are owned by users" on public.profiles;
 create policy "profiles are owned by users" on public.profiles
   for all to authenticated
   using (id = auth.uid())
   with check (id = auth.uid());
 
+drop policy if exists "cv documents are owned by users" on public.cv_documents;
 create policy "cv documents are owned by users" on public.cv_documents
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "cv analysis results are owned by users" on public.cv_analysis_results;
 create policy "cv analysis results are owned by users" on public.cv_analysis_results
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "work experiences are owned by users" on public.work_experiences;
 create policy "work experiences are owned by users" on public.work_experiences
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "educations are owned by users" on public.educations;
 create policy "educations are owned by users" on public.educations
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "skills are owned by users" on public.skills;
 create policy "skills are owned by users" on public.skills
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "certifications are owned by users" on public.certifications;
 create policy "certifications are owned by users" on public.certifications
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "projects are owned by users" on public.projects;
 create policy "projects are owned by users" on public.projects
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "interview sessions are owned by users" on public.interview_sessions;
 create policy "interview sessions are owned by users" on public.interview_sessions
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "quiz sessions are owned by users" on public.quiz_sessions;
 create policy "quiz sessions are owned by users" on public.quiz_sessions
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "subscriptions are owned by users" on public.subscriptions;
 create policy "subscriptions are owned by users" on public.subscriptions
   for select to authenticated
   using (user_id = auth.uid());
 
+drop policy if exists "users can upload own private cv files" on storage.objects;
 create policy "users can upload own private cv files" on storage.objects
   for insert to authenticated
   with check (
@@ -332,6 +344,7 @@ create policy "users can upload own private cv files" on storage.objects
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "users can read own private cv files" on storage.objects;
 create policy "users can read own private cv files" on storage.objects
   for select to authenticated
   using (
@@ -339,6 +352,7 @@ create policy "users can read own private cv files" on storage.objects
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "users can update own private cv files" on storage.objects;
 create policy "users can update own private cv files" on storage.objects
   for update to authenticated
   using (
@@ -350,6 +364,7 @@ create policy "users can update own private cv files" on storage.objects
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "users can delete own private cv files" on storage.objects;
 create policy "users can delete own private cv files" on storage.objects
   for delete to authenticated
   using (

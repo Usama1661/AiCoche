@@ -139,7 +139,7 @@ export default function AiQuizScreen() {
   const questions = useMemo(
     () =>
       buildQuiz({
-        professionLabel: profile.professionLabel || 'Mobile App Developer',
+        professionLabel: profile.professionLabel,
         experience: profile.experience,
         goal: profile.goal,
         language: profile.language,
@@ -267,7 +267,7 @@ export default function AiQuizScreen() {
             Profile
           </AppText>
           <AppText variant="body" style={styles.summaryValue} numberOfLines={1}>
-            {profile.professionLabel || 'Mobile App Developer'}
+            {profile.professionLabel || 'Profession not set'}
           </AppText>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>

@@ -15,7 +15,7 @@ import { spacing } from '@/src/theme/tokens';
 export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
-  const displayName = useSessionStore((s) => s.displayName) || 'Alex Developer';
+  const displayName = useSessionStore((s) => s.displayName);
   const lastCvScore = useMetricsStore((s) => s.lastCvScore);
   const lastInterviewScore = useMetricsStore((s) => s.lastInterviewScore);
   const lastQuizScore = useMetricsStore((s) => s.lastQuizScore);
@@ -47,21 +47,21 @@ export default function HomeScreen() {
         <ScoreBlock
           icon="trending-up-outline"
           tint={colors.success}
-          value={lastCvScore != null ? String(lastCvScore) : '78'}
+          value={lastCvScore != null ? String(lastCvScore) : '—'}
           label="CV Score"
         />
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
         <ScoreBlock
           icon="ribbon-outline"
           tint={colors.primary}
-          value={lastInterviewScore != null ? String(lastInterviewScore) : '8.5'}
+          value={lastInterviewScore != null ? String(lastInterviewScore) : '—'}
           label="Interview"
         />
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
         <ScoreBlock
           icon="school-outline"
           tint="#F59E0B"
-          value={lastQuizScore != null ? `${lastQuizScore}%` : 'New'}
+          value={lastQuizScore != null ? `${lastQuizScore}%` : '—'}
           label={lastQuizLevel ?? 'AI Quiz'}
         />
       </View>

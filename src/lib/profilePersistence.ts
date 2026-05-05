@@ -5,6 +5,7 @@ export type ProfileSnapshot = {
   onboardingComplete: boolean;
   professionKey: string;
   professionLabel: string;
+  avatarUrl: string;
   experience: ExperienceLevel | null;
   goal: CareerGoal | null;
   language: string;
@@ -36,6 +37,7 @@ type ProfileRow = {
   current_designation: string | null;
   current_company: string | null;
   employment_status: string | null;
+  avatar_url: string | null;
   summary: string | null;
   ai_profile: Partial<ProfileSnapshot> | null;
 };
@@ -61,6 +63,7 @@ export function mergeProfileFromRow(row: ProfileRow): ProfileSnapshot {
     onboardingComplete: Boolean(ai.onboardingComplete),
     professionKey: typeof ai.professionKey === 'string' ? ai.professionKey : '',
     professionLabel: typeof ai.professionLabel === 'string' ? ai.professionLabel : '',
+    avatarUrl: typeof ai.avatarUrl === 'string' ? ai.avatarUrl : row.avatar_url || '',
     experience: ai.experience ?? null,
     goal: ai.goal ?? null,
     language: typeof ai.language === 'string' ? ai.language : 'English',
@@ -84,7 +87,7 @@ export async function loadProfileSnapshot(): Promise<ProfileSnapshot | null> {
   const { data, error } = await supabase
     .from('profiles')
     .select(
-      'full_name,email,headline,current_designation,current_company,employment_status,summary,ai_profile'
+      'full_name,email,headline,current_designation,current_company,employment_status,avatar_url,summary,ai_profile'
     )
     .eq('id', user.id)
     .maybeSingle<ProfileRow>();
@@ -117,9 +120,49 @@ export async function saveProfileSnapshot(snapshot: ProfileSnapshot): Promise<vo
     current_designation: professionalProfile.currentDesignation || null,
     current_company: professionalProfile.currentCompany || null,
     employment_status: professionalProfile.employmentStatus || null,
+    avatar_url: snapshot.avatarUrl || null,
     summary: professionalProfile.bio || null,
     ai_profile: snapshot,
   });
 
   if (error) throw error;
+}
+
+export async function uploadProfileAvatar(params: {
+  uri: string;
+  mimeType?: string | null;
+  base64?: string | null;
+}): Promise<string> {
+  if (!hasSupabaseConfig()) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!user) throw new Error('Please sign in before uploading a profile image.');
+
+  const response = params.base64 ? null : await fetch(params.uri);
+  const fileBody = params.base64
+    ? Uint8Array.from(atob(params.base64), (char) => char.charCodeAt(0)).buffer
+    : await response!.arrayBuffer();
+  const contentType = params.mimeType || response?.headers.get('content-type') || 'image/jpeg';
+  if (fileBody.byteLength === 0) {
+    throw new Error('Selected image could not be read. Please choose another photo.');
+  }
+  const extension = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+  const path = `${user.id}/avatar-${Date.now()}.${extension}`;
+
+  const { error } = await supabase.storage
+    .from('avatars')
+    .upload(path, fileBody, {
+      contentType,
+    });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+  return data.publicUrl;
 }

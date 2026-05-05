@@ -22,6 +22,7 @@ type ProfileActionKey =
   | 'removeTool'
   | 'addProject'
   | 'removeProject'
+  | 'setAvatarUrl'
   | 'loadRemoteProfile';
 
 export type { ProfileSnapshot };
@@ -56,6 +57,7 @@ type ProfileState = ProfileSnapshot & {
   removeTool: (s: string) => void;
   addProject: (s: string) => void;
   removeProject: (s: string) => void;
+  setAvatarUrl: (url: string) => void;
   loadRemoteProfile: () => Promise<void>;
 };
 
@@ -81,6 +83,7 @@ const initial: Omit<
   onboardingComplete: false,
   professionKey: '',
   professionLabel: '',
+  avatarUrl: '',
   experience: null,
   goal: null,
   language: 'English',
@@ -95,6 +98,7 @@ function selectSnapshot(state: ProfileState): ProfileSnapshot {
     onboardingComplete: state.onboardingComplete,
     professionKey: state.professionKey,
     professionLabel: state.professionLabel,
+    avatarUrl: state.avatarUrl,
     experience: state.experience,
     goal: state.goal,
     language: state.language,
@@ -186,6 +190,10 @@ export const useProfileStore = create<ProfileState>()(
       },
       removeProject: (s) => {
         set({ projects: get().projects.filter((x) => x !== s) });
+        persistSnapshot(get());
+      },
+      setAvatarUrl: (url) => {
+        set({ avatarUrl: url });
         persistSnapshot(get());
       },
       loadRemoteProfile: async () => {

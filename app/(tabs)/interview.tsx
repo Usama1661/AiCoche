@@ -13,9 +13,9 @@ import { spacing } from '@/src/theme/tokens';
 export default function InterviewTabScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
-  const professionLabel = useProfileStore((s) => s.professionLabel) || 'Mobile App Developer';
+  const professionLabel = useProfileStore((s) => s.professionLabel);
   const chatsUsed = useUsageStore((s) => s.chatsUsed);
-  const lastInterviewScore = useMetricsStore((s) => s.lastInterviewScore) ?? 8.5;
+  const lastInterviewScore = useMetricsStore((s) => s.lastInterviewScore);
   const progress = Math.min(1, chatsUsed / FREE_CHAT_LIMIT);
 
   return (
@@ -38,7 +38,7 @@ export default function InterviewTabScreen() {
             Start New Interview
           </AppText>
           <AppText variant="body" style={styles.heroText} numberOfLines={1}>
-            AI-powered {professionLabel} interview
+            AI-powered {professionLabel || 'career'} interview
           </AppText>
         </View>
       </Pressable>
@@ -52,21 +52,23 @@ export default function InterviewTabScreen() {
         </AppText>
       </View>
       <View style={[styles.track, { backgroundColor: colors.border }]}>
-        <View style={[styles.fill, { width: `${Math.max(progress, 0.3) * 100}%` }]} />
+        <View style={[styles.fill, { width: `${progress * 100}%` }]} />
       </View>
 
       <AppText variant="title" style={styles.sectionTitle}>
         Past Sessions
       </AppText>
 
-      <PastSession title="React & System Design" date="May 2, 2026" score={lastInterviewScore} />
-      <PastSession title="JavaScript Fundamentals" date="Apr 28, 2026" score={7.2} />
-      <PastSession title="Data Structures" date="Apr 25, 2026" score={9} />
+      {lastInterviewScore != null ? (
+        <PastSession title={professionLabel ? `${professionLabel} interview` : 'Latest interview'} score={lastInterviewScore} />
+      ) : (
+        <EmptyState message="No interview sessions yet. Start your first interview to see progress here." />
+      )}
     </Screen>
   );
 }
 
-function PastSession({ title, date, score }: { title: string; date: string; score: number }) {
+function PastSession({ title, score }: { title: string; score: number }) {
   const { colors } = useAppTheme();
   return (
     <Pressable
@@ -80,7 +82,7 @@ function PastSession({ title, date, score }: { title: string; date: string; scor
       <View style={{ flex: 1 }}>
         <AppText variant="subtitle">{title}</AppText>
         <AppText variant="body" muted style={{ fontWeight: '700' }}>
-          {date}
+          Latest session
         </AppText>
       </View>
       <View style={styles.scorePill}>
@@ -91,6 +93,18 @@ function PastSession({ title, date, score }: { title: string; date: string; scor
       </View>
       <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
     </Pressable>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  const { colors } = useAppTheme();
+  return (
+    <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <Ionicons name="time-outline" size={24} color={colors.textMuted} />
+      <AppText variant="body" muted style={styles.emptyText}>
+        {message}
+      </AppText>
+    </View>
   );
 }
 
@@ -155,4 +169,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
   },
+  emptyState: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  emptyText: { flex: 1, fontWeight: '800' },
 });

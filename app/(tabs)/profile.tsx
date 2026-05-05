@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Alert,
+  Image,
   Modal,
   Pressable,
   StyleSheet,
@@ -8,11 +9,13 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
 import { Screen } from '@/src/components/ui/Screen';
+import { uploadProfileAvatar } from '@/src/lib/profilePersistence';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useSessionStore } from '@/src/store/sessionStore';
@@ -39,14 +42,19 @@ function labelGoal(id: string) {
 export default function ProfileScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
-  const email = useSessionStore((s) => s.email) || 'ai';
-  const displayName = useSessionStore((s) => s.displayName) || 'Alex Developer';
+  const email = useSessionStore((s) => s.email);
+  const displayName = useSessionStore((s) => s.displayName);
   const logout = useSessionStore((s) => s.logout);
 
-  const professionLabel = useProfileStore((s) => s.professionLabel) || 'Mobile App Developer';
-  const experience = useProfileStore((s) => s.experience) || 'intermediate';
-  const goal = useProfileStore((s) => s.goal) || 'job';
+  const avatarUrl = useProfileStore((s) => s.avatarUrl);
+  const professionLabel = useProfileStore((s) => s.professionLabel);
+  const experience = useProfileStore((s) => s.experience);
+  const goal = useProfileStore((s) => s.goal);
   const language = useProfileStore((s) => s.language);
+  const professionalProfile = useProfileStore((s) => s.professionalProfile);
+  const setOnboardingField = useProfileStore((s) => s.setOnboardingField);
+  const updateProfessionalProfile = useProfileStore((s) => s.updateProfessionalProfile);
+  const setAvatarUrl = useProfileStore((s) => s.setAvatarUrl);
   const skills = useProfileStore((s) => s.skills);
   const tools = useProfileStore((s) => s.tools);
   const projects = useProfileStore((s) => s.projects);
@@ -62,8 +70,14 @@ export default function ProfileScreen() {
 
   const [modal, setModal] = useState<'skill' | 'tool' | 'project' | null>(null);
   const [draft, setDraft] = useState('');
-  const visibleSkills = skills.length ? skills : ['React', 'TypeScript', 'Node.js', 'Python'];
-  const visibleTools = tools.length ? tools : ['VS Code', 'Git', 'Docker'];
+  const [editOpen, setEditOpen] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [profileDraft, setProfileDraft] = useState({
+    fullName: professionalProfile.fullName || displayName,
+    professionLabel,
+    language,
+  });
+  const visibleName = professionalProfile.fullName || displayName || 'Your profile';
 
   function saveDraft() {
     if (!modal) return;
@@ -74,6 +88,69 @@ export default function ProfileScreen() {
     if (modal === 'project') addProject(t);
     setDraft('');
     setModal(null);
+  }
+
+  function openEditProfile() {
+    setProfileDraft({
+      fullName: professionalProfile.fullName || displayName,
+      professionLabel,
+      language,
+    });
+    setEditOpen(true);
+  }
+
+  function saveProfileDetails() {
+    const fullName = profileDraft.fullName.trim();
+    const nextProfession = profileDraft.professionLabel.trim();
+    const nextLanguage = profileDraft.language.trim() || 'English';
+
+    updateProfessionalProfile({
+      fullName,
+      headline: professionalProfile.headline || nextProfession,
+      source: professionalProfile.source ?? 'manual',
+    });
+    setOnboardingField({
+      professionLabel: nextProfession,
+      language: nextLanguage,
+    });
+    setEditOpen(false);
+  }
+
+  async function pickAvatar() {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to upload a profile image.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+      base64: true,
+    });
+
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset?.uri) return;
+
+    try {
+      setUploadingAvatar(true);
+      const publicUrl = await uploadProfileAvatar({
+        uri: asset.uri,
+        mimeType: asset.mimeType,
+        base64: asset.base64,
+      });
+      setAvatarUrl(publicUrl);
+    } catch (error) {
+      Alert.alert(
+        'Upload failed',
+        error instanceof Error ? error.message : 'Could not upload your profile image.'
+      );
+    } finally {
+      setUploadingAvatar(false);
+    }
   }
 
   async function signOut() {
@@ -100,26 +177,36 @@ export default function ProfileScreen() {
       </View>
 
       <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={styles.avatar}>
-          <Ionicons name="person-outline" size={46} color={colors.primary} />
-        </View>
+        <Pressable onPress={pickAvatar} disabled={uploadingAvatar} style={styles.avatar}>
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+          ) : (
+            <Ionicons name="person-outline" size={46} color={colors.primary} />
+          )}
+          <View style={[styles.avatarBadge, { backgroundColor: colors.primary }]}>
+            <Ionicons name={uploadingAvatar ? 'hourglass-outline' : 'camera-outline'} size={15} color="#FFFFFF" />
+          </View>
+        </Pressable>
         <View style={{ flex: 1 }}>
-          <AppText variant="title">{displayName}</AppText>
+          <AppText variant="title">{visibleName}</AppText>
           <AppText variant="body" muted style={{ fontWeight: '800', marginVertical: 2 }}>
-            {email.split('@')[0]}
+            {email || 'No email'}
           </AppText>
           <View style={styles.rolePill}>
             <Ionicons name="briefcase-outline" size={14} color={colors.primary} />
             <AppText variant="caption" style={{ color: colors.primary, fontWeight: '900' }}>
-              {professionLabel}
+              {professionLabel || 'Profession not set'}
             </AppText>
           </View>
         </View>
+        <Pressable onPress={openEditProfile} hitSlop={8}>
+          <Ionicons name="create-outline" size={24} color={colors.primary} />
+        </Pressable>
       </View>
 
       <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <InfoRow icon="trending-up-outline" color={colors.primary} label="Experience" value={labelExperience(experience)} />
-        <InfoRow icon="ribbon-outline" color={colors.success} label="Career Goal" value={labelGoal(goal)} />
+        <InfoRow icon="trending-up-outline" color={colors.primary} label="Experience" value={labelExperience(experience ?? '')} />
+        <InfoRow icon="ribbon-outline" color={colors.success} label="Career Goal" value={labelGoal(goal ?? '')} />
         <InfoRow icon="globe-outline" color="#F59E0B" label="Language" value={language || 'English'} />
       </View>
 
@@ -143,14 +230,14 @@ export default function ProfileScreen() {
 
       <Section
         title="Skills"
-        items={visibleSkills}
+        items={skills}
         onAdd={() => setModal('skill')}
         onRemove={removeSkill}
         tone="primary"
       />
       <Section
         title="Tools"
-        items={visibleTools}
+        items={tools}
         onAdd={() => setModal('tool')}
         onRemove={removeTool}
         tone="success"
@@ -195,6 +282,52 @@ export default function ProfileScreen() {
             />
             <Button title="Save" onPress={saveDraft} />
             <Button title="Cancel" variant="ghost" onPress={() => setModal(null)} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={editOpen} transparent animationType="fade">
+        <Pressable style={styles.modalBackdrop} onPress={() => setEditOpen(false)}>
+          <Pressable
+            style={[styles.modalSheet, { backgroundColor: colors.surface }]}
+            onPress={(e) => e.stopPropagation()}>
+            <AppText variant="subtitle">Edit profile</AppText>
+            <TextInput
+              value={profileDraft.fullName}
+              onChangeText={(fullName) => setProfileDraft((current) => ({ ...current, fullName }))}
+              placeholder="Full name"
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.input,
+                { color: colors.text, borderColor: colors.border, backgroundColor: colors.background },
+              ]}
+            />
+            <TextInput
+              value={profileDraft.professionLabel}
+              onChangeText={(nextProfession) =>
+                setProfileDraft((current) => ({ ...current, professionLabel: nextProfession }))
+              }
+              placeholder="Profession"
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.input,
+                { color: colors.text, borderColor: colors.border, backgroundColor: colors.background },
+              ]}
+            />
+            <TextInput
+              value={profileDraft.language}
+              onChangeText={(nextLanguage) =>
+                setProfileDraft((current) => ({ ...current, language: nextLanguage }))
+              }
+              placeholder="Preferred language"
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.input,
+                { color: colors.text, borderColor: colors.border, backgroundColor: colors.background },
+              ]}
+            />
+            <Button title="Save changes" onPress={saveProfileDetails} />
+            <Button title="Cancel" variant="ghost" onPress={() => setEditOpen(false)} />
           </Pressable>
         </Pressable>
       </Modal>
@@ -308,6 +441,21 @@ const styles = StyleSheet.create({
     height: 88,
     borderRadius: 22,
     backgroundColor: 'rgba(79,70,229,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarBadge: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },

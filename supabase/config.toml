@@ -4,7 +4,3 @@
 [api]
 enabled = true
 
-[functions]
-# Edge Functions require Supabase Auth JWTs. The mobile app should sign users in with
-# Supabase Auth and call functions with the authenticated Supabase client.
-verify_jwt = true
