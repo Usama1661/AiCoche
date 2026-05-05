@@ -33,18 +33,18 @@ function parseMultipart(req) {
 
 async function extractPdf(buffer) {
   try {
-    const text = await extractPdfWithPdf2Json(buffer);
-    if (text.trim().length > 20) return text;
-  } catch (error) {
-    console.warn('pdf2json failed, trying pdf-parse', error);
-  }
-
-  try {
     const result = await pdfParse(buffer);
     const text = result.text || '';
     if (text.trim().length > 20) return text;
   } catch (error) {
-    console.warn('pdf-parse failed, using fallback extraction', error);
+    console.warn('pdf-parse failed, trying pdf2json', error);
+  }
+
+  try {
+    const text = await extractPdfWithPdf2Json(buffer);
+    if (text.trim().length > 20) return text;
+  } catch (error) {
+    console.warn('pdf2json failed, using fallback extraction', error);
   }
 
   return fallbackPdfText(buffer);
