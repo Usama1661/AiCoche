@@ -555,7 +555,7 @@ const styles = StyleSheet.create({
   },
   scanCore: {
     position: 'absolute',
-    top: 66,
+    top: 74,
     width: 78,
     height: 78,
     borderRadius: 26,
