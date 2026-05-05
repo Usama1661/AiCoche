@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "AiCoche",
-    "slug": "AiCoche",
+    "slug": "ai-coche",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -22,7 +22,8 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.aicoche"
     },
     "web": {
       "bundler": "metro",
@@ -41,6 +42,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "86e1dc54-d31a-42ab-b658-084417651ba5"
+      }
+    },
+    "owner": "usamanawazzs-organization"
   }
 }
