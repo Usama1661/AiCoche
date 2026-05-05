@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import { loadDashboardMetrics } from '@/src/lib/api/metrics';
 import type { CvAnalysis } from '@/src/types/cv';
 
 type MetricsState = {
@@ -22,6 +23,7 @@ type MetricsState = {
   setLastCvScore: (n: number | null) => void;
   setLastInterviewScore: (n: number | null) => void;
   setLastQuizResult: (score: number, level: string) => void;
+  loadRemoteMetrics: () => Promise<void>;
   resetMetrics: () => void;
 };
 
@@ -63,6 +65,10 @@ export const useMetricsStore = create<MetricsState>()(
           lastQuizLevel: level,
           lastQuizDate: new Date().toISOString(),
         }),
+      loadRemoteMetrics: async () => {
+        const remote = await loadDashboardMetrics();
+        set(remote);
+      },
       resetMetrics: () => set({ ...initialMetrics }),
     }),
     { name: 'aicoche-metrics', storage: createJSONStorage(() => AsyncStorage) }

@@ -18,7 +18,11 @@ import { ChatInput } from '@/src/components/chat/ChatInput';
 import { TypingIndicator } from '@/src/components/chat/TypingIndicator';
 import { AppHeader } from '@/src/components/layout/AppHeader';
 import { UpgradeSheet } from '@/src/components/subscription/UpgradeSheet';
-import { continueInterview, startInterview } from '@/src/lib/api/interview';
+import {
+  continueInterview,
+  saveInterviewSessionScore,
+  startInterview,
+} from '@/src/lib/api/interview';
 import { buildUserProfileFromStores } from '@/src/lib/buildUserProfile';
 import type { InterviewMessage } from '@/src/types/interview';
 import { useMetricsStore } from '@/src/store/metricsStore';
@@ -96,6 +100,16 @@ export default function InterviewSessionScreen() {
       const res = await continueInterview({ sessionId, answer: text });
       setTyping(false);
       setLastInterviewScore(res.score);
+      const profile = buildUserProfileFromStores();
+      saveInterviewSessionScore({
+        sessionId,
+        title: profile.professionLabel
+          ? `${profile.professionLabel} interview`
+          : 'Interview practice',
+        score: res.score,
+        status: res.finished ? 'completed' : 'active',
+        feedback: res.feedback,
+      }).catch(() => {});
 
       setMessages((prev) => {
         const feedbackMsg: InterviewMessage = {

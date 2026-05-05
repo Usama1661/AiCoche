@@ -100,3 +100,25 @@ export async function continueInterview(params: {
   if (!data) throw new Error('Invalid continue-interview response');
   return data;
 }
+
+export async function saveInterviewSessionScore(params: {
+  sessionId: string;
+  title: string;
+  score: number;
+  status: 'active' | 'completed';
+  feedback?: string;
+}) {
+  if (!AUTHENTICATION_ENABLED || !hasSupabaseConfig()) return;
+
+  const { error } = await supabase
+    .from('interview_sessions')
+    .update({
+      title: params.title,
+      status: params.status,
+      score: params.score,
+      feedback: params.feedback ? { summary: params.feedback } : {},
+    })
+    .eq('id', params.sessionId);
+
+  if (error) throw error;
+}

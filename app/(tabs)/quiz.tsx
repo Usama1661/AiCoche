@@ -6,6 +6,7 @@ import { AppText } from '@/src/components/ui/AppText';
 import { Button } from '@/src/components/ui/Button';
 import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { Screen } from '@/src/components/ui/Screen';
+import { saveQuizResult } from '@/src/lib/api/metrics';
 import { useMetricsStore } from '@/src/store/metricsStore';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
@@ -194,6 +195,12 @@ export default function AiQuizScreen() {
     setAnswers(nextAnswers);
     setResult({ score, level });
     setLastQuizResult(score, level);
+    saveQuizResult({
+      topic: profile.professionLabel || 'AI Quiz',
+      questions,
+      answers: nextAnswers,
+      score,
+    }).catch(() => {});
   }
 
   if (result) {

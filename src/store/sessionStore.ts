@@ -89,6 +89,7 @@ export const useSessionStore = create<SessionState>()(
         }
         set(sessionFromUser(session.user));
         await useProfileStore.getState().loadRemoteProfile();
+        await useMetricsStore.getState().loadRemoteMetrics();
       },
       login: async (email, password) => {
         if (!hasSupabaseConfig()) {
@@ -109,6 +110,7 @@ export const useSessionStore = create<SessionState>()(
         }
         set(sessionFromUser(data.user));
         await useProfileStore.getState().loadRemoteProfile();
+        await useMetricsStore.getState().loadRemoteMetrics();
       },
       signup: async (email, password, name) => {
         if (!hasSupabaseConfig()) {
@@ -139,6 +141,7 @@ export const useSessionStore = create<SessionState>()(
         }
         set(sessionFromUser(data.user));
         await useProfileStore.getState().loadRemoteProfile();
+        await useMetricsStore.getState().loadRemoteMetrics();
         return { needsEmailConfirmation: false };
       },
       logout: async () => {
