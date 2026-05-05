@@ -34,6 +34,24 @@ function mockContinue(_answer: string): ContinueInterviewResponse {
   };
 }
 
+async function functionErrorMessage(error: unknown): Promise<string> {
+  if (!error || typeof error !== 'object') {
+    return 'Request failed.';
+  }
+
+  const context = 'context' in error ? (error as { context?: unknown }).context : null;
+  if (context instanceof Response) {
+    try {
+      const body = (await context.clone().json()) as { error?: string; message?: string };
+      return body.error || body.message || `Request failed with status ${context.status}.`;
+    } catch {
+      return `Request failed with status ${context.status}.`;
+    }
+  }
+
+  return error instanceof Error ? error.message : 'Request failed.';
+}
+
 export async function startInterview(profile: UserProfile): Promise<StartInterviewResponse> {
   if (!AUTHENTICATION_ENABLED) {
     await new Promise((r) => setTimeout(r, 700));
@@ -52,7 +70,7 @@ export async function startInterview(profile: UserProfile): Promise<StartIntervi
     'start-interview',
     { body: { profile } }
   );
-  if (error) throw error;
+  if (error) throw new Error(await functionErrorMessage(error));
   if (!data?.question) throw new Error('Invalid start-interview response');
   return data;
 }
@@ -78,7 +96,7 @@ export async function continueInterview(params: {
     'continue-interview',
     { body: params }
   );
-  if (error) throw error;
+  if (error) throw new Error(await functionErrorMessage(error));
   if (!data) throw new Error('Invalid continue-interview response');
   return data;
 }
