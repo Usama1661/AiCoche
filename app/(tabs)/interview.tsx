@@ -9,7 +9,7 @@ import { useMetricsStore } from '@/src/store/metricsStore';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useUsageStore, FREE_CHAT_LIMIT } from '@/src/store/usageStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
-import { gradients, spacing } from '@/src/theme/tokens';
+import { spacing } from '@/src/theme/tokens';
 
 export default function InterviewTabScreen() {
   const router = useRouter();
@@ -32,7 +32,7 @@ export default function InterviewTabScreen() {
         onPress={() => router.push('/interview-session')}
         style={({ pressed }) => [styles.hero, { opacity: pressed ? 0.9 : 1 }]}>
         <LinearGradient
-          colors={gradients.primary}
+          colors={colors.primaryGradient}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFillObject}

@@ -10,7 +10,7 @@ import {
 
 import { AppText } from '@/src/components/ui/AppText';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
-import { gradients, motion, radii, spacing } from '@/src/theme/tokens';
+import { motion, radii, spacing } from '@/src/theme/tokens';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -86,7 +86,7 @@ export function Button({
       ]}>
       {isPrimary && !isDisabled ? (
         <LinearGradient
-          colors={gradients.primary}
+          colors={colors.primaryGradient}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFillObject}

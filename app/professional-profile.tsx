@@ -12,7 +12,7 @@ import { Screen } from '@/src/components/ui/Screen';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
-import { gradients, spacing } from '@/src/theme/tokens';
+import { spacing } from '@/src/theme/tokens';
 import type { Certification, ProfessionalEducation, ProfessionalExperience, ProfessionalProfile } from '@/src/types/user';
 
 function makeId(prefix: string) {
@@ -183,7 +183,7 @@ export default function ProfessionalProfileScreen() {
       ) : null}
 
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <LinearGradient colors={gradients.hero} style={styles.cover} />
+        <LinearGradient colors={colors.heroGradient} style={styles.cover} />
         <View style={[styles.avatar, { borderColor: colors.card, backgroundColor: colors.primaryTint }]}>
           {avatarUrl ? (
             <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />

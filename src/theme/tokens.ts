@@ -50,6 +50,9 @@ export type ColorPalette = {
   errorTint: string;
   infoTint: string;
   mutedTint: string;
+  primaryGradient: readonly [string, string];
+  heroGradient: readonly [string, string, string];
+  surfaceGradient: readonly [string, string];
 };
 
 export const darkColors: ColorPalette = {
@@ -83,15 +86,52 @@ export const darkColors: ColorPalette = {
   errorTint: 'rgba(248, 113, 113, 0.14)',
   infoTint: 'rgba(96, 165, 250, 0.14)',
   mutedTint: 'rgba(92, 92, 114, 0.18)',
+  primaryGradient: ['#7C3AED', '#B266FF'],
+  heroGradient: ['#1E1235', '#15102A', '#13131F'],
+  surfaceGradient: ['#1A1A2A', '#13131F'],
 };
 
-export const lightColors: ColorPalette = darkColors;
+export const lightColors: ColorPalette = {
+  background: '#FAF7FF',
+  surface: '#F1ECFA',
+  elevated: '#FFFFFF',
+  card: '#FFFFFF',
+  border: '#E6DDF2',
+  borderMuted: '#D8CAE8',
+  text: '#211A2F',
+  textSecondary: '#6F6680',
+  textMuted: '#A79AB8',
+  textInverse: '#FFFFFF',
+  primary: '#8B3DFF',
+  primaryDark: '#6D28D9',
+  primaryLight: '#B266FF',
+  primaryMuted: '#A855F7',
+  secondaryPink: '#E94F86',
+  accentGold: '#D97706',
+  success: '#16A34A',
+  warning: '#D97706',
+  error: '#DC2626',
+  info: '#2563EB',
+  overlay: 'rgba(33, 26, 47, 0.45)',
+  aiBubble: '#F1ECFA',
+  userBubble: '#F4E8FF',
+  glow: 'rgba(139, 61, 255, 0.22)',
+  primaryTint: 'rgba(139, 61, 255, 0.12)',
+  successTint: 'rgba(22, 163, 74, 0.12)',
+  warningTint: 'rgba(217, 119, 6, 0.12)',
+  errorTint: 'rgba(220, 38, 38, 0.10)',
+  infoTint: 'rgba(37, 99, 235, 0.10)',
+  mutedTint: 'rgba(167, 154, 184, 0.18)',
+  primaryGradient: ['#7C3AED', '#B266FF'],
+  heroGradient: ['#FFFFFF', '#F4E8FF', '#EDE5FA'],
+  surfaceGradient: ['#FFFFFF', '#F1ECFA'],
+};
 
 export const gradients = {
-  primary: ['#7C3AED', '#B266FF'] as const,
-  hero: ['#1E1235', '#15102A', '#13131F'] as const,
+  primary: darkColors.primaryGradient,
+  hero: darkColors.heroGradient,
   purpleGlow: ['#7C3AED', '#B266FF', '#FF6B9D'] as const,
-  surface: ['#1A1A2A', '#13131F'] as const,
+  surface: darkColors.surfaceGradient,
 } as const;
 
 export const motion = {
