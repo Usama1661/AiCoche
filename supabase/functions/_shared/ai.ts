@@ -319,9 +319,23 @@ function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysi
       url: '',
     })),
     cvScore: cvText.length > 1200 ? 76 : 62,
-    strengths: ['CV content was parsed and structured successfully.'],
-    weaknesses: ['Add more quantified impact and measurable outcomes.'],
-    improvementSuggestions: ['Add metrics to each role.', 'Group skills by category.', 'Add links for projects where possible.'],
+    strengths: [
+      'CV content was parsed successfully and core profile sections are readable.',
+      targetRole
+        ? `The CV has enough context to align toward ${targetRole}.`
+        : 'The CV includes enough context to build a career profile.',
+    ],
+    weaknesses: [
+      'Most experience bullets need stronger measurable outcomes such as revenue, users, speed, quality, or delivery impact.',
+      'Skills and projects should be grouped more clearly so recruiters can scan the CV faster.',
+    ],
+    improvementSuggestions: [
+      'Rewrite each role with 2-3 achievement bullets using this format: action + tool/skill + measurable result.',
+      'Add project links, portfolio links, or GitHub links where possible to prove practical work.',
+      targetRole
+        ? `Add target keywords for ${targetRole} in the summary, skills, and recent project bullets.`
+        : 'Add target-role keywords in the summary, skills, and project bullets.',
+    ],
     recommendedSkills: targetRole ? [`Skills aligned with ${targetRole}`] : ['Target-role keywords'],
     jobRoleFit: {},
   };
@@ -428,7 +442,13 @@ export async function analyzeCvWithAi(cvText: string, targetRole?: string): Prom
   "recommendedSkills": string[],
   "jobRoleFit": object
 }
-Use empty strings or empty arrays when unknown. Score is 0-100.`,
+Use empty strings or empty arrays when unknown. Score is 0-100.
+Make the analysis practical and specific:
+- strengths must explain what is already working in the CV
+- weaknesses must explain what is hurting the CV
+- improvementSuggestions must be direct next steps the user can apply
+- recommendedSkills must be target-role skills, not generic filler
+- avoid vague phrases like "good communication" unless the CV proves it`,
       },
       {
         role: 'user',

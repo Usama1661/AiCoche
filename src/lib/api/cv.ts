@@ -29,8 +29,8 @@ function mockAnalysis(profile: UserProfile): CvAnalysis {
     ],
     missingSkills: ['Stakeholder communication', 'Cloud fundamentals', 'Testing discipline'],
     suggestions: [
-      'Add 2–3 bullet achievements with metrics per role.',
-      'Tie skills to outcomes (what you built, who benefited).',
+      'Rewrite each role with 2-3 achievement bullets using action + tool + measurable result.',
+      'Tie skills to outcomes by explaining what you built, who benefited, and what improved.',
       'Keep resume to one page if early career; two pages only if senior.',
     ],
     overallScore: 78,
