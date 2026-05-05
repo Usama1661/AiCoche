@@ -1,11 +1,18 @@
 import { DarkTheme, DefaultTheme, ThemeProvider as NavThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { Alert } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import {
+  addInterviewReminderReceivedListener,
+  addInterviewReminderResponseListener,
+  getLastInterviewReminderResponse,
+  INTERVIEW_REMINDER_ROUTE,
+} from '@/src/lib/notifications';
 import { AppThemeProvider, useAppTheme } from '@/src/theme/ThemeProvider';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 
@@ -30,6 +37,41 @@ function NavBridge({ children }: { children: React.ReactNode }) {
   return <NavThemeProvider value={merged}>{children}</NavThemeProvider>;
 }
 
+function NotificationRouteHandler() {
+  const router = useRouter();
+  const handledInitialResponse = useRef(false);
+
+  useEffect(() => {
+    const openInterviewReminder = () => {
+      requestAnimationFrame(() => {
+        router.push(INTERVIEW_REMINDER_ROUTE as never);
+      });
+    };
+
+    const subscription = addInterviewReminderResponseListener(openInterviewReminder);
+    const receivedSubscription = addInterviewReminderReceivedListener(({ title, body }) => {
+      Alert.alert(title, body, [
+        { text: 'Later', style: 'cancel' },
+        { text: 'Start now', onPress: openInterviewReminder },
+      ]);
+    });
+
+    if (!handledInitialResponse.current) {
+      handledInitialResponse.current = true;
+      getLastInterviewReminderResponse().then((response) => {
+        if (response) openInterviewReminder();
+      });
+    }
+
+    return () => {
+      subscription.remove();
+      receivedSubscription.remove();
+    };
+  }, [router]);
+
+  return null;
+}
+
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
@@ -52,6 +94,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AppThemeProvider>
         <NavBridge>
+          <NotificationRouteHandler />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="index" />
             <Stack.Screen name="(auth)" />

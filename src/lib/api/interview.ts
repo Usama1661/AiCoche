@@ -1,5 +1,6 @@
 import type {
   ContinueInterviewResponse,
+  InterviewMessage,
   StartInterviewResponse,
 } from '@/src/types/interview';
 import type { UserProfile } from '@/src/types/user';
@@ -7,6 +8,19 @@ import { AUTHENTICATION_ENABLED } from '@/src/lib/auth';
 import { hasSupabaseConfig, supabase } from '@/src/lib/supabase';
 
 let mockCounter = 0;
+
+export type InterviewSessionSummary = {
+  id: string;
+  title: string;
+  score: number | null;
+  status: 'active' | 'completed' | 'abandoned';
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InterviewSessionDetail = InterviewSessionSummary & {
+  messages: InterviewMessage[];
+};
 
 function mockStart(profile: UserProfile): StartInterviewResponse {
   mockCounter = 0;
@@ -121,4 +135,82 @@ export async function saveInterviewSessionScore(params: {
     .eq('id', params.sessionId);
 
   if (error) throw error;
+}
+
+function normalizeMessages(value: unknown): InterviewMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((message, index) => {
+      if (!message || typeof message !== 'object') return null;
+      const item = message as { role?: unknown; content?: unknown; score?: unknown };
+      if (
+        item.role !== 'assistant' &&
+        item.role !== 'user' &&
+        item.role !== 'system'
+      ) {
+        return null;
+      }
+      if (typeof item.content !== 'string') return null;
+      return {
+        id: `${index}-${item.role}`,
+        role: item.role,
+        content: item.content,
+        score: typeof item.score === 'number' ? item.score : undefined,
+      };
+    })
+    .filter(Boolean) as InterviewMessage[];
+}
+
+function sessionTitle(row: { title: string | null; profile: unknown }) {
+  if (row.title?.trim()) return row.title.trim();
+  const profile = row.profile as { professionLabel?: unknown } | null;
+  return typeof profile?.professionLabel === 'string'
+    ? `${profile.professionLabel} interview`
+    : 'Interview practice';
+}
+
+export async function listInterviewSessions(): Promise<InterviewSessionSummary[]> {
+  if (!AUTHENTICATION_ENABLED || !hasSupabaseConfig()) return [];
+
+  const { data, error } = await supabase
+    .from('interview_sessions')
+    .select('id, title, profile, score, status, created_at, updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(10);
+
+  if (error) throw error;
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    title: sessionTitle(row),
+    score: typeof row.score === 'number' ? row.score : null,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function getInterviewSession(sessionId: string): Promise<InterviewSessionDetail> {
+  if (!AUTHENTICATION_ENABLED || !hasSupabaseConfig()) {
+    throw new Error('Interview history is available after sign in.');
+  }
+
+  const { data, error } = await supabase
+    .from('interview_sessions')
+    .select('id, title, profile, messages, score, status, created_at, updated_at')
+    .eq('id', sessionId)
+    .single();
+
+  if (error) throw error;
+  if (!data) throw new Error('Interview session not found.');
+
+  return {
+    id: data.id,
+    title: sessionTitle(data),
+    score: typeof data.score === 'number' ? data.score : null,
+    status: data.status,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+    messages: normalizeMessages(data.messages),
+  };
 }

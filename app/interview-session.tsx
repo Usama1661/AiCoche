@@ -7,7 +7,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppText } from '@/src/components/ui/AppText';
@@ -20,6 +20,7 @@ import { AppHeader } from '@/src/components/layout/AppHeader';
 import { UpgradeSheet } from '@/src/components/subscription/UpgradeSheet';
 import {
   continueInterview,
+  getInterviewSession,
   saveInterviewSessionScore,
   startInterview,
 } from '@/src/lib/api/interview';
@@ -36,6 +37,7 @@ function id() {
 
 export default function InterviewSessionScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ sessionId?: string; mode?: string }>();
   const { colors } = useAppTheme();
   const setLastInterviewScore = useMetricsStore((s) => s.setLastInterviewScore);
   const canStartChat = useUsageStore((s) => s.canStartChat());
@@ -50,9 +52,35 @@ export default function InterviewSessionScreen() {
   const [error, setError] = useState<string | null>(null);
   const [waitingAnswer, setWaitingAnswer] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [historyStatus, setHistoryStatus] = useState<'active' | 'completed' | 'abandoned' | null>(null);
   const listRef = useRef<FlatList>(null);
+  const historySessionId = typeof params.sessionId === 'string' ? params.sessionId : null;
+  const isHistoryMode = params.mode === 'history' && !!historySessionId;
+  const canContinueHistory = isHistoryMode && plan === 'pro' && historyStatus === 'active';
 
   const boot = useCallback(async () => {
+    if (isHistoryMode && historySessionId) {
+      setLoadingStart(true);
+      setError(null);
+      try {
+        const session = await getInterviewSession(historySessionId);
+        const lastMessage = session.messages.at(-1);
+        setSessionId(session.id);
+        setMessages(session.messages);
+        setHistoryStatus(session.status);
+        setWaitingAnswer(
+          plan === 'pro' &&
+            session.status === 'active' &&
+            lastMessage?.role === 'assistant'
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not load interview history');
+      } finally {
+        setLoadingStart(false);
+      }
+      return;
+    }
+
     if (!canStartChat) {
       setUpgradeOpen(true);
       return;
@@ -77,7 +105,7 @@ export default function InterviewSessionScreen() {
     } finally {
       setLoadingStart(false);
     }
-  }, [canStartChat, incrementChat]);
+  }, [canStartChat, historySessionId, incrementChat, isHistoryMode, plan]);
 
   const startedRef = useRef(false);
   useEffect(() => {
@@ -146,7 +174,7 @@ export default function InterviewSessionScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
       <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.sm }}>
-        <AppHeader title="Mock interview" onBack={() => router.back()} />
+        <AppHeader title={isHistoryMode ? 'Interview history' : 'Mock interview'} onBack={() => router.back()} />
         {error ? (
           <View style={{ marginBottom: spacing.sm }}>
             <ErrorBanner message={error} />
@@ -155,7 +183,15 @@ export default function InterviewSessionScreen() {
             ) : null}
           </View>
         ) : null}
-        {plan === 'free' ? (
+        {isHistoryMode ? (
+          <AppText variant="caption" muted style={{ marginBottom: spacing.sm }}>
+            {canContinueHistory
+              ? 'Pro mode: continue this saved interview chat.'
+              : plan === 'pro' && historyStatus === 'completed'
+                ? 'This interview is completed, so the transcript is read-only.'
+                : 'Free users can view past transcripts. Upgrade to Pro to continue saved chats.'}
+          </AppText>
+        ) : plan === 'free' ? (
           <AppText variant="caption" muted style={{ marginBottom: spacing.sm }}>
             Free plan: limited mock chats. Upgrade for unlimited practice.
           </AppText>
@@ -196,20 +232,38 @@ export default function InterviewSessionScreen() {
           )}
         />
 
-        <View style={[styles.inputWrap, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
-          <ChatInput
-            value={input}
-            onChangeText={setInput}
-            onSend={send}
-            disabled={!waitingAnswer || typing || loadingStart}
-          />
-          <Button
-            title="End session"
-            variant="ghost"
-            onPress={() => router.back()}
-            style={{ marginTop: spacing.sm }}
-          />
-        </View>
+        {isHistoryMode && !canContinueHistory ? (
+          <View style={[styles.inputWrap, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
+            <Button
+              title={plan === 'free' ? 'Upgrade to continue chats' : 'Back to interviews'}
+              variant={plan === 'free' ? 'primary' : 'ghost'}
+              onPress={plan === 'free' ? () => setUpgradeOpen(true) : () => router.back()}
+            />
+            {plan === 'free' ? (
+              <Button
+                title="Back to interviews"
+                variant="ghost"
+                onPress={() => router.back()}
+                style={{ marginTop: spacing.sm }}
+              />
+            ) : null}
+          </View>
+        ) : (
+          <View style={[styles.inputWrap, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
+            <ChatInput
+              value={input}
+              onChangeText={setInput}
+              onSend={send}
+              disabled={!waitingAnswer || typing || loadingStart}
+            />
+            <Button
+              title="End session"
+              variant="ghost"
+              onPress={() => router.back()}
+              style={{ marginTop: spacing.sm }}
+            />
+          </View>
+        )}
       </KeyboardAvoidingView>
 
       <UpgradeSheet visible={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
