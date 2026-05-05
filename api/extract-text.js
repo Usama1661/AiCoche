@@ -3,6 +3,7 @@ const zlib = require('zlib');
 const { formidable } = require('formidable');
 const mammoth = require('mammoth');
 const pdfParse = require('pdf-parse');
+const PDFParser = require('pdf2json');
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -32,6 +33,13 @@ function parseMultipart(req) {
 
 async function extractPdf(buffer) {
   try {
+    const text = await extractPdfWithPdf2Json(buffer);
+    if (text.trim().length > 20) return text;
+  } catch (error) {
+    console.warn('pdf2json failed, trying pdf-parse', error);
+  }
+
+  try {
     const result = await pdfParse(buffer);
     const text = result.text || '';
     if (text.trim().length > 20) return text;
@@ -40,6 +48,26 @@ async function extractPdf(buffer) {
   }
 
   return fallbackPdfText(buffer);
+}
+
+function extractPdfWithPdf2Json(buffer) {
+  return new Promise((resolve, reject) => {
+    const parser = new PDFParser(null, 1);
+
+    parser.on('pdfParser_dataError', (error) => {
+      reject(error?.parserError || error);
+    });
+
+    parser.on('pdfParser_dataReady', () => {
+      try {
+        resolve(parser.getRawTextContent() || '');
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    parser.parseBuffer(buffer);
+  });
 }
 
 function decodePdfString(value) {
