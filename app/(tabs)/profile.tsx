@@ -67,11 +67,8 @@ export default function ProfileScreen() {
   const tools = useProfileStore((s) => s.tools);
   const projects = useProfileStore((s) => s.projects);
   const addSkill = useProfileStore((s) => s.addSkill);
-  const removeSkill = useProfileStore((s) => s.removeSkill);
   const addTool = useProfileStore((s) => s.addTool);
-  const removeTool = useProfileStore((s) => s.removeTool);
   const addProject = useProfileStore((s) => s.addProject);
-  const removeProject = useProfileStore((s) => s.removeProject);
   const cvAnalysesUsed = useUsageStore((s) => s.cvAnalysesUsed);
   const chatsUsed = useUsageStore((s) => s.chatsUsed);
   const setPlan = useUsageStore((s) => s.setPlan);
@@ -246,21 +243,18 @@ export default function ProfileScreen() {
         title="Skills"
         items={skills}
         onAdd={() => setModal('skill')}
-        onRemove={removeSkill}
         tone="primary"
       />
       <Section
         title="Tools"
         items={tools}
         onAdd={() => setModal('tool')}
-        onRemove={removeTool}
         tone="success"
       />
       <Section
         title="Projects"
         items={projects}
         onAdd={() => setModal('project')}
-        onRemove={removeProject}
         tone="neutral"
       />
 
@@ -353,13 +347,11 @@ function Section({
   title,
   items,
   onAdd,
-  onRemove,
   tone,
 }: {
   title: string;
   items: string[];
   onAdd: () => void;
-  onRemove: (s: string) => void;
   tone: 'primary' | 'success' | 'neutral';
 }) {
   const { colors } = useAppTheme();
@@ -379,13 +371,13 @@ function Section({
           </AppText>
         ) : (
           items.map((x) => (
-            <Pressable key={x} onPress={() => onRemove(x)} style={styles.chipWrap}>
+            <View key={x} style={styles.chipWrap}>
               <View style={[styles.chip, { backgroundColor: `${chipColor}13` }]}>
                 <AppText variant="caption" style={{ color: chipColor, fontWeight: '900' }}>
                   {x}
                 </AppText>
               </View>
-            </Pressable>
+            </View>
           ))
         )}
       </View>

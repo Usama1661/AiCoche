@@ -38,16 +38,41 @@ function usefulProfession(value: unknown) {
 
 function usefulName(value: unknown) {
   const text = typeof value === 'string' ? value.trim() : '';
-  return /^(test|expense tracker app)$/i.test(text) || /page\s*\(?\d+\)?|break|^-{3,}/i.test(text)
+  return /^(test|expense tracker app)$/i.test(text) ||
+    /page\s*\(?\d+\)?|break|^-{3,}/i.test(text) ||
+    /developer|engineer|designer|manager|analyst|experience|university|company|software|app|optimization|bug|resolution|notification|feature|community|portfolio|linkedin/i.test(text)
     ? ''
     : text;
+}
+
+const dateRangePattern = /((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})\s*(?:[–-]\s*)?((?:present|current|now)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}|\d{4})/i;
+
+function cleanRoleTitle(value: string) {
+  return value.replace(dateRangePattern, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizedExperience(item: CvAiAnalysis['experiences'][number]) {
+  const combined = [item.title, item.company, item.startDate, item.endDate].filter(Boolean).join(' ');
+  const dateMatch = combined.match(dateRangePattern);
+  const startDate = item.startDate || dateMatch?.[1] || '';
+  const endDate = item.endDate || dateMatch?.[2] || '';
+  const badCompany = /^(present|current|now|\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))/i.test(item.company.trim());
+
+  return {
+    ...item,
+    title: cleanRoleTitle(item.title),
+    company: badCompany ? '' : item.company,
+    startDate,
+    endDate,
+  };
 }
 
 function appProfileSnapshot(existingProfile: Record<string, unknown> | null, analysis: CvAiAnalysis) {
   const existingAi = objectOrEmpty(existingProfile?.ai_profile);
   const existingProfessional = objectOrEmpty(existingAi.professionalProfile);
   const hasManualIdentity = existingProfessional.source === 'manual';
-  const current = analysis.experiences.find((item) => /present|current|now/i.test(item.endDate)) ?? analysis.experiences[0];
+  const normalizedExperiences = analysis.experiences.map(normalizedExperience);
+  const current = normalizedExperiences.find((item) => /present|current|now/i.test(item.endDate)) ?? normalizedExperiences[0];
   const technicalSkills = analysis.skills
     .filter((item) => item.category !== 'soft')
     .map((item) => item.name);
@@ -70,7 +95,7 @@ function appProfileSnapshot(existingProfile: Record<string, unknown> | null, ana
         ? usefulProfession(existingProfessional.headline) || analysis.currentRole || current?.title || ''
         : analysis.currentRole || current?.title || '',
       bio: analysis.summary || '',
-      experiences: analysis.experiences.map((item, index) => ({
+      experiences: normalizedExperiences.map((item, index) => ({
         id: `resume-experience-${index + 1}`,
         company: item.company,
         title: item.title,
@@ -146,7 +171,8 @@ export async function saveAnalysisAndAutofill({
 
   if (analysisError) throw analysisError;
 
-  const current = analysis.experiences.find((item) => /present|current|now/i.test(item.endDate)) ?? analysis.experiences[0];
+  const normalizedExperiences = analysis.experiences.map(normalizedExperience);
+  const current = normalizedExperiences.find((item) => /present|current|now/i.test(item.endDate)) ?? normalizedExperiences[0];
   const { data: existingProfile, error: existingProfileError } = await supabase
     .from('profiles')
     .select('full_name, email, phone, headline, current_designation, ai_profile, avatar_url')
@@ -196,9 +222,9 @@ export async function saveAnalysisAndAutofill({
     if (result.error) throw result.error;
   }
 
-  if (analysis.experiences.length) {
+  if (normalizedExperiences.length) {
     const { error } = await supabase.from('work_experiences').insert(
-      analysis.experiences.map((item) => ({
+      normalizedExperiences.map((item) => ({
         user_id: userId,
         company_name: item.company || 'Unknown company',
         job_title: item.title || 'Professional role',

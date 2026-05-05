@@ -103,6 +103,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     paddingHorizontal: spacing.xl,
     overflow: 'hidden',
+    justifyContent: 'center',
   },
   content: {
     minHeight: 54,

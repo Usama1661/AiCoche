@@ -19,6 +19,7 @@ import {
   useInterviewReminderStore,
   type InterviewReminder,
 } from '@/src/store/interviewReminderStore';
+import { useSessionStore } from '@/src/store/sessionStore';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useUsageStore, FREE_CHAT_LIMIT } from '@/src/store/usageStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
@@ -27,6 +28,7 @@ import { spacing } from '@/src/theme/tokens';
 export default function InterviewTabScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
+  const userId = useSessionStore((s) => s.userId);
   const professionLabel = useProfileStore((s) => s.professionLabel);
   const chatsUsed = useUsageStore((s) => s.chatsUsed);
   const reminders = useInterviewReminderStore((s) => s.reminders);
@@ -46,16 +48,18 @@ export default function InterviewTabScreen() {
   const upcomingReminders = useMemo(
     () =>
       reminders
+        .filter((reminder) => reminder.ownerUserId === userId)
         .filter((reminder) => new Date(reminder.scheduledAt).getTime() > now)
         .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()),
-    [now, reminders]
+    [now, reminders, userId]
   );
   const readyReminders = useMemo(
     () =>
       reminders
+        .filter((reminder) => reminder.ownerUserId === userId)
         .filter((reminder) => new Date(reminder.scheduledAt).getTime() <= now)
         .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()),
-    [now, reminders]
+    [now, reminders, userId]
   );
 
   useFocusEffect(

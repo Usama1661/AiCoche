@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { hasSupabaseConfig, supabase } from '@/src/lib/supabase';
+import { useInterviewReminderStore } from '@/src/store/interviewReminderStore';
 import { useMetricsStore } from '@/src/store/metricsStore';
 import { useProfileStore } from '@/src/store/profileStore';
 import { useUsageStore } from '@/src/store/usageStore';
@@ -58,6 +59,7 @@ function resetUserScopedStores() {
   useProfileStore.getState().reset();
   useMetricsStore.getState().resetMetrics();
   useUsageStore.getState().resetAllUsage();
+  void useInterviewReminderStore.getState().cancelReminder();
 }
 
 export const useSessionStore = create<SessionState>()(

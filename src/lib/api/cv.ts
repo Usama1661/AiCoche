@@ -1,7 +1,12 @@
 import type { CvAnalysis, UploadCvResponse } from '@/src/types/cv';
 import type { UserProfile } from '@/src/types/user';
 import { AUTHENTICATION_ENABLED } from '@/src/lib/auth';
-import { hasSupabaseConfig, supabase } from '@/src/lib/supabase';
+import {
+  getSupabaseAnonKey,
+  getSupabaseUrl,
+  hasSupabaseConfig,
+  supabase,
+} from '@/src/lib/supabase';
 
 export type UploadCvInput = {
   uri: string;
@@ -37,6 +42,16 @@ function mockAnalysis(profile: UserProfile): CvAnalysis {
   };
 }
 
+function mimeTypeFor(name: string, fallback: string) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.doc')) return 'application/msword';
+  if (lower.endsWith('.docx')) {
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  }
+  return fallback || 'application/pdf';
+}
+
 async function functionErrorMessage(error: unknown): Promise<string> {
   if (!error || typeof error !== 'object') {
     return 'Request failed.';
@@ -60,19 +75,42 @@ export async function uploadCv(input: UploadCvInput): Promise<UploadCvResponse> 
     throw new Error('Supabase upload is not configured.');
   }
 
+  const mimeType = mimeTypeFor(input.name, input.mimeType);
   const file = {
     uri: input.uri,
     name: input.name,
-    type: input.mimeType,
+    type: mimeType,
   };
   const form = new FormData();
   form.append('file', file as unknown as Blob);
 
-  const { data, error } = await supabase.functions.invoke<UploadCvResponse>('upload-cv', {
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (!session?.access_token) throw new Error('Please sign in again before uploading a CV.');
+
+  const response = await fetch(`${getSupabaseUrl()}/functions/v1/upload-cv`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: getSupabaseAnonKey(),
+    },
     body: form,
   });
 
-  if (error) throw new Error(await functionErrorMessage(error));
+  if (!response.ok) {
+    try {
+      const body = (await response.json()) as { error?: string; message?: string };
+      throw new Error(body.error || body.message || `Upload failed with status ${response.status}.`);
+    } catch (error) {
+      if (error instanceof Error && !error.message.includes('JSON')) throw error;
+      throw new Error(`Upload failed with status ${response.status}.`);
+    }
+  }
+
+  const data = (await response.json()) as UploadCvResponse;
   if (!data?.cvDocument?.id) throw new Error('Invalid upload-cv response');
   return data;
 }

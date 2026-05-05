@@ -203,7 +203,6 @@ export default function OnboardingScreen() {
           onPress={next}
           disabled={!canContinue}
           style={styles.continueBtn}
-          leftIcon={<Ionicons name="chevron-forward" size={22} color={colors.textInverse} />}
         />
       </View>
     </SafeAreaView>
@@ -352,14 +351,14 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: spacing.xxl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xl,
   },
   backBtn: { width: 54, height: 58, alignItems: 'center', justifyContent: 'center' },
-  continueBtn: { flex: 1, minHeight: 66, flexDirection: 'row-reverse' },
+  continueBtn: { flex: 1, minHeight: 66 },
   other: {
     borderWidth: 1,
     borderRadius: 16,
