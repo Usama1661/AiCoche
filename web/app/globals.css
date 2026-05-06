@@ -2076,14 +2076,32 @@ textarea.input.chat-textarea {
   }
 
   .dashboard-score-card {
-    grid-template-columns: repeat(3, minmax(150px, 1fr));
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow-x: hidden;
   }
 
   .dashboard-score-card .metric-card {
-    min-height: 124px;
-    min-width: 150px;
+    min-height: 114px;
+    min-width: 0;
+    padding: 12px 8px;
+    gap: 6px;
+  }
+
+  .dashboard-score-card .metric-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 11px;
+    font-size: 14px;
+  }
+
+  .dashboard-score-card .metric-value {
+    font-size: clamp(22px, 7vw, 28px);
+    line-height: 1.05;
+  }
+
+  .dashboard-score-card .subtitle {
+    font-size: 11px;
+    line-height: 15px;
   }
 
   .dashboard-score-card .metric-card + .metric-card {
@@ -2169,8 +2187,43 @@ textarea.input.chat-textarea {
   }
 
   .interview-screen {
-    height: calc(100dvh - 112px);
+    height: auto;
+    min-height: calc(100dvh - 112px);
+    overflow: visible;
     padding-bottom: 12px;
+  }
+
+  .interview-chat-card {
+    min-height: calc(100dvh - 190px);
+    overflow: hidden;
+  }
+
+  .chat-scroll {
+    min-height: 320px;
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .chat-row {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .chat-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    font-size: 9px;
+  }
+
+  .message {
+    max-width: calc(100% - 38px);
+    padding: 11px 12px;
+  }
+
+  .chat-readonly-footer {
+    padding: 12px;
+    gap: 8px;
   }
 
   .interview-chat-header,
