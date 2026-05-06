@@ -116,6 +116,7 @@ type QuizQuestion = {
 };
 
 type RemoteProfileRow = {
+  onboardingComplete?: unknown;
   avatarUrl?: unknown;
   professionKey?: unknown;
   professionLabel?: unknown;
@@ -603,17 +604,27 @@ function mergeRemoteProfile(remote: unknown, fallback: ProfileState): ProfileSta
     text(profileRow.headline) ||
     text(profileRow.current_designation) ||
     fallback.professionLabel;
+  const remoteProfessionKey = typeof data.professionKey === 'string' ? data.professionKey : fallback.professionKey;
+  const remoteProfessionLabel = typeof data.professionLabel === 'string' && data.professionLabel.trim()
+    ? data.professionLabel
+    : bestHeadline || fallback.professionLabel;
+  const remoteExperience = isExperience(data.experience) ? data.experience : fallback.experience;
+  const remoteGoal = isGoal(data.goal) ? data.goal : fallback.goal;
+  const hasSavedOnboardingAnswers = typeof data.professionKey === 'string' && data.professionKey.trim() &&
+    typeof data.professionLabel === 'string' && data.professionLabel.trim() &&
+    isExperience(data.experience) &&
+    isGoal(data.goal);
+  const remoteOnboardingComplete = data.onboardingComplete === true ||
+    Boolean(hasSavedOnboardingAnswers);
 
   return {
     ...fallback,
-    onboardingComplete: true,
+    onboardingComplete: remoteOnboardingComplete,
     avatarUrl: text(data.avatarUrl) || text(profileRow.avatar_url) || fallback.avatarUrl,
-    professionKey: typeof data.professionKey === 'string' ? data.professionKey : fallback.professionKey,
-    professionLabel: typeof data.professionLabel === 'string' && data.professionLabel.trim()
-      ? data.professionLabel
-      : bestHeadline || fallback.professionLabel,
-    experience: isExperience(data.experience) ? data.experience : fallback.experience,
-    goal: isGoal(data.goal) ? data.goal : fallback.goal,
+    professionKey: remoteProfessionKey,
+    professionLabel: remoteProfessionLabel,
+    experience: remoteExperience,
+    goal: remoteGoal,
     language: typeof data.language === 'string' && data.language.trim() ? data.language : fallback.language,
     skills: compactSkills([...technicalSkills, ...stringList(data.skills), ...fallback.skills]),
     tools: compactSkills([...toolSkills, ...stringList(data.tools), ...fallback.tools]),
@@ -1031,7 +1042,7 @@ function Splash({ onDone }: { onDone: () => void }) {
   );
 }
 
-function Auth({ mode, setUser, setView, setBusy, setError, busy }: CommonProps & { mode: 'login' | 'signup' }) {
+function Auth({ mode, setUser, setProfile, setView, setBusy, setError, busy }: CommonProps & { mode: 'login' | 'signup' }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -1063,6 +1074,17 @@ function Auth({ mode, setUser, setView, setBusy, setError, busy }: CommonProps &
       setError('Account created. Confirm your email, then sign in.');
       setView('login');
       return;
+    }
+    if (mode === 'signup') {
+      setProfile({
+        ...initialProfile,
+        professionalProfile: {
+          ...emptyProfessionalProfile,
+          fullName: name.trim() || email.trim().split('@')[0],
+          email: email.trim(),
+        },
+      });
+      setView('onboarding');
     }
     setUser(result.data.user);
   }
