@@ -33,6 +33,7 @@ export type CvAiAnalysis = {
   improvementSuggestions: string[];
   recommendedSkills: string[];
   jobRoleFit: Record<string, unknown>;
+  additionalSections: Array<{ title: string; items: string[] }>;
 };
 
 const emptyAnalysis: CvAiAnalysis = {
@@ -53,6 +54,7 @@ const emptyAnalysis: CvAiAnalysis = {
   improvementSuggestions: [],
   recommendedSkills: [],
   jobRoleFit: {},
+  additionalSections: [],
 };
 
 function sectionBetween(text: string, start: RegExp, end: RegExp[]) {
@@ -118,7 +120,7 @@ function cleanName(value: string | undefined) {
 }
 
 function isSectionHeading(value: string) {
-  return /^(professional summary|work experience|education|skills|projects|certifications)$/i.test(value.trim());
+  return /^(professional summary|summary|work experience|experience|education|skills|projects|certifications|recommendations|academic experience|languages|websites\s*&\s*profiles)$/i.test(value.trim());
 }
 
 function looksLikePersonName(value: string) {
@@ -167,6 +169,8 @@ function isLikelySkill(value: string) {
   if (!line || line.length > 45) return false;
   if (/^\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(line)) return false;
   if (/education|university|college|bachelor|master|degree|location|email|phone/i.test(line)) return false;
+  if (/recommendations?|name\s*:|mr\.?|mrs\.?|lecturer|supervisor|supervised|under my|working under|ceo|founder|final year|linkedin|github|website|portfolio|country|city|address/i.test(line)) return false;
+  if (/[|:]/.test(line)) return false;
   if (/islamabad|rawalpindi|lahore|karachi|pakistan/i.test(line)) return false;
   if (/developer|engineer|designer|manager|analyst|company|pvt|ltd|software house/i.test(line)) return false;
   if (/^[-•]/.test(line) || /\.$/.test(line)) return false;
@@ -259,14 +263,20 @@ function parseEducation(educationText: string): CvAiAnalysis['education'] {
   const educationLines = lines(educationText);
   if (!educationLines.length) return [];
 
-  const degreeLine = educationLines.find((line) => /bachelor|master|degree|diploma|science|computer/i.test(line)) ?? educationLines[0];
+  const dateLine = educationLines.find((line) => /\d{4}|\d{1,2}\/\d{1,2}\/\d{4}/.test(line)) ?? '';
+  const degreeLine = educationLines.find((line) => /bachelor|master|degree|diploma|bs\b|ms\b|phd|science|computer/i.test(line)) ?? educationLines[0];
   const institutionLine =
     educationLines.find((line) => /university|college|institute|school/i.test(line)) ??
-    educationLines.find((line) => line !== degreeLine && !/\d{4}/.test(line)) ??
+    educationLines.find((line) => line !== degreeLine && line !== dateLine && !/\d{4}/.test(line)) ??
     '';
-  const dateLine = educationLines.find((line) => /\d{4}/.test(line)) ?? '';
-  const { startDate, endDate } = parseDateRange(dateLine);
+  const slashDates = Array.from(dateLine.matchAll(/\d{1,2}\/\d{1,2}\/\d{4}/g)).map((match) => match[0]);
+  const { startDate, endDate } = slashDates.length
+    ? { startDate: slashDates[0] ?? '', endDate: slashDates[1] ?? '' }
+    : parseDateRange(dateLine);
   const fieldOfStudy = degreeLine.match(/\bin\s+(.+)$/i)?.[1]?.trim() ?? '';
+  const description = educationLines
+    .filter((line) => line !== degreeLine && line !== institutionLine && line !== dateLine)
+    .join('\n');
 
   return [
     {
@@ -275,9 +285,46 @@ function parseEducation(educationText: string): CvAiAnalysis['education'] {
       fieldOfStudy,
       startDate,
       endDate,
-      description: educationLines.join('\n'),
+      description,
     },
   ];
+}
+
+function extractAdditionalSections(cvText: string) {
+  const prepared = normalizeCvTextOrder(cvText);
+  const headingPattern = /^(professional summary|summary|work experience|experience|education|skills|projects|certifications|recommendations|academic experience|languages|websites\s*&\s*profiles)$/gim;
+  const headings = Array.from(prepared.matchAll(headingPattern)).map((match) => ({
+    title: match[1],
+    index: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+  const known = /^(professional summary|summary|work experience|experience|education|skills|projects|certifications)$/i;
+  return headings
+    .map((heading, index) => {
+      const next = headings[index + 1]?.index ?? prepared.length;
+      const body = prepared.slice(heading.end, next);
+      return {
+        title: heading.title.replace(/\b\w/g, (letter) => letter.toUpperCase()),
+        items: lines(body).filter((line) => !isContactLine(line)).slice(0, 12),
+      };
+    })
+    .filter((section) => !known.test(section.title) && section.items.length);
+}
+
+function extractRecommendationSections(cvText: string) {
+  const recommendationText = sectionBetween(cvText, /^recommendations?$/im, [
+    /^professional summary$/im,
+    /^summary$/im,
+    /^(?:work\s+)?experience$/im,
+    /^education$/im,
+    /^skills$/im,
+    /^projects$/im,
+    /^certifications$/im,
+    /^languages$/im,
+    /^websites\s*&\s*profiles$/im,
+  ]);
+  const recommendationLines = lines(recommendationText).filter((line) => !isContactLine(line));
+  return recommendationLines.length ? [{ title: 'Recommendations', items: recommendationLines }] : [];
 }
 
 function isValidExperience(item: CvAiAnalysis['experiences'][number]) {
@@ -387,6 +434,7 @@ function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysi
     ],
     recommendedSkills: targetRole ? [`Skills aligned with ${targetRole}`] : ['Target-role keywords'],
     jobRoleFit: {},
+    additionalSections: [...extractAdditionalSections(cvText), ...extractRecommendationSections(cvText)],
   };
 }
 
@@ -413,6 +461,7 @@ function mergeWithSectionParse(ai: CvAiAnalysis, parsed: CvAiAnalysis): CvAiAnal
     experiences,
     education: parsed.education.length ? parsed.education : ai.education,
     skills: parsed.skills.length ? parsed.skills : ai.skills,
+    additionalSections: [...parsed.additionalSections, ...ai.additionalSections],
   };
 }
 
@@ -481,6 +530,12 @@ export function normalizeCvAnalysis(value: Record<string, unknown>): CvAiAnalysi
       value.jobRoleFit && typeof value.jobRoleFit === 'object'
         ? (value.jobRoleFit as Record<string, unknown>)
         : {},
+    additionalSections: asArray<Record<string, unknown>>(value.additionalSections)
+      .map((section) => ({
+        title: asString(section.title),
+        items: asArray<string>(section.items).map(asString).filter(Boolean),
+      }))
+      .filter((section) => section.title && section.items.length),
   };
 }
 
@@ -510,7 +565,8 @@ export async function analyzeCvWithAi(cvText: string, targetRole?: string): Prom
   "weaknesses": string[],
   "improvementSuggestions": string[],
   "recommendedSkills": string[],
-  "jobRoleFit": object
+  "jobRoleFit": object,
+  "additionalSections": [{"title": string, "items": string[]}]
 }
 Use empty strings or empty arrays when unknown. Score is 0-100.
 Critical extraction rules:
@@ -523,6 +579,11 @@ Critical extraction rules:
 - Correct obvious PDF/OCR extraction mistakes in common technical terms, for example "React NaOve" or "React Na(ve" should be "React Native".
 - summary must be a clean professional paragraph only. Do not include name, email, phone, LinkedIn, portfolio URL, or repeated job title in summary.
 - Do not duplicate the current/present role as a separate past role.
+- Education must be split accurately: institution is only school/university name, degree is only qualification, startDate/endDate are only dates/years, description is only extra academic detail.
+- If the CV contains Recommendations/References, preserve them in additionalSections as {"title":"Recommendations","items":[...]} with recommender name, role/title, and recommendation text in each item when available.
+- If the CV contains sections not listed above, such as Academic Experience, Publications, Awards, Languages, or Websites & Profiles, preserve them in additionalSections with the same heading title and clean bullet items.
+- Do not put recommendations, references, supervisor names, URLs, academic metadata, locations, dates, or contact details into skills.
+- Skills must contain only real skills/tools/technologies, e.g. React Native, Firebase, SQL, Python. Exclude phrases like "Name: Mr ...", "whom I supervised...", "CEO & Founder...", and links.
 Make the analysis practical and specific:
 - strengths must explain what is already working in the CV
 - weaknesses must explain what is hurting the CV
