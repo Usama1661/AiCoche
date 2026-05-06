@@ -126,6 +126,7 @@ function appProfileSnapshot(existingProfile: Record<string, unknown> | null, ana
         issuer: item.issuer,
         date: item.date,
       })),
+      extraSections: analysis.additionalSections,
       source: 'resume',
       updatedAt: new Date().toISOString(),
     },
