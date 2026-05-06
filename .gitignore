@@ -5,3 +5,10 @@ node_modules
 
 expo-env.d.ts
 # @end expo-cli
+
+.env
+.env.local
+web/.env
+web/.env.local
+web/.next
+web/node_modules
