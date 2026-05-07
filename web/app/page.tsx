@@ -97,6 +97,26 @@ type Message = {
   score?: number;
 };
 
+type ProjectRecommendation = {
+  id: string;
+  title: string;
+  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  timeline: string;
+  summary: string;
+  why: string;
+  skills: string[];
+  features: string[];
+  stack: string[];
+  portfolioTips: string[];
+  interviewTalkingPoints: string[];
+};
+
+type ProjectChatMessage = {
+  id: string;
+  role: 'assistant' | 'user';
+  content: string;
+};
+
 type InterviewHistoryItem = {
   id: string;
   title: string;
@@ -961,10 +981,11 @@ export default function WebApp() {
         <>
           <WebHeader
             active={isTab(view) ? view : null}
-            profile={profile}
-            user={user}
+            theme={theme}
+            setTheme={setTheme}
             usage={usage}
             setView={setView}
+            onSignOut={signOut}
           />
           {view === 'home' ? <Home {...common} /> : null}
           {view === 'interview' ? <InterviewTab {...common} /> : null}
@@ -1348,12 +1369,40 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
     MOTIVATIONAL_QUOTES.indexOf(motivation)
   );
   const activeMotivation = MOTIVATIONAL_QUOTES[Math.max(0, motivationIndex)] ?? motivation;
+  const projectRecommendations = useMemo(() => generateProjectRecommendations(profile, metrics), [profile, metrics]);
+  const [selectedProject, setSelectedProject] = useState<ProjectRecommendation | null>(null);
+  const [projectMessages, setProjectMessages] = useState<ProjectChatMessage[]>([]);
+  const [projectQuestion, setProjectQuestion] = useState('');
   useEffect(() => {
     const interval = window.setInterval(() => {
       setMotivationIndex((current) => (current + 1) % MOTIVATIONAL_QUOTES.length);
     }, 6000);
     return () => window.clearInterval(interval);
   }, []);
+
+  function openProject(project: ProjectRecommendation) {
+    setSelectedProject(project);
+    setProjectQuestion('');
+    setProjectMessages([
+      {
+        id: id(),
+        role: 'assistant',
+        content: initialProjectMessage(project, profile),
+      },
+    ]);
+  }
+
+  function askProjectQuestion() {
+    if (!selectedProject || !projectQuestion.trim()) return;
+    const question = projectQuestion.trim();
+    setProjectMessages((current) => [
+      ...current,
+      { id: id(), role: 'user', content: question },
+      { id: id(), role: 'assistant', content: buildProjectAnswer(selectedProject, profile, question) },
+    ]);
+    setProjectQuestion('');
+  }
+
   const recommended = [
     { title: 'Frontend Developer', detail: 'Practice React, UI systems, and portfolio storytelling.' },
     { title: 'Data Analyst', detail: 'Sharpen SQL, dashboards, stakeholder communication, and metrics.' },
@@ -1373,6 +1422,7 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
   ];
 
   return (
+    <>
     <section className="screen dashboard-screen">
       <div className="dashboard-hero">
         <div className="dashboard-hero-copy">
@@ -1422,12 +1472,6 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
 
       <div className="dashboard-layout">
         <div className="dashboard-main stack">
-          <div className="dashboard-score-card">
-            <Score label="CV Score" value={metrics.lastCvScore ?? '—'} color="var(--success)" icon="↗" />
-            <Score label="Interview" value={metrics.lastInterviewScore ?? '—'} color="var(--primary)" icon="◎" />
-            <Score label={metrics.lastQuizLevel ?? 'AI Quiz'} value={metrics.lastQuizScore != null ? `${metrics.lastQuizScore}%` : '—'} color="var(--gold)" icon="◇" />
-          </div>
-
           <button className="dashboard-profile-card" onClick={() => setView('professional-profile')}>
             <div className="row" style={{ gap: 18 }}>
               <Avatar profile={profile} user={user} large />
@@ -1460,6 +1504,35 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
             <Action title="Analyze CV" subtitle="AI-powered review" icon="▤" onClick={() => setView('cv-analysis')} />
             <Action title="Start Interview" subtitle="Practice with AI" icon="◌" onClick={() => setView('interview-session')} />
             <Action title="AI Quiz" subtitle="Check your level" icon="◇" onClick={() => setView('quiz')} />
+          </div>
+
+          <div className="project-recommendation-panel card stack">
+            <div className="row between dashboard-section-title">
+              <div>
+                <span className="hero-kicker">Recommended Projects</span>
+                <h2 className="title" style={{ marginTop: 10 }}>Build proof for your profile</h2>
+              </div>
+              <p className="body muted">Personalized from your role, CV score, and skills.</p>
+            </div>
+            <div className="project-card-grid">
+              {projectRecommendations.map((project) => (
+                <button className="project-card" key={project.id} onClick={() => openProject(project)} type="button">
+                  <div className="row between">
+                    <span className="mini-pill">{project.difficulty}</span>
+                    <span className="caption muted">{project.timeline}</span>
+                  </div>
+                  <div>
+                    <h3 className="subtitle" style={{ fontSize: 16 }}>{project.title}</h3>
+                    <p className="caption muted" style={{ marginTop: 7 }}>{project.summary}</p>
+                  </div>
+                  <div className="project-skill-row">
+                    {project.skills.slice(0, 3).map((skill) => (
+                      <span className="project-skill" key={skill}>{skill}</span>
+                    ))}
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1518,6 +1591,110 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
             ))}
           </div>
         </aside>
+      </div>
+
+    </section>
+    {selectedProject ? (
+      <ProjectDetailModal
+        project={selectedProject}
+        profile={profile}
+        messages={projectMessages}
+        question={projectQuestion}
+        setQuestion={setProjectQuestion}
+        onAsk={askProjectQuestion}
+        onClose={() => setSelectedProject(null)}
+      />
+    ) : null}
+    </>
+  );
+}
+
+function ProjectDetailModal({
+  project,
+  profile,
+  messages,
+  question,
+  setQuestion,
+  onAsk,
+  onClose,
+}: {
+  project: ProjectRecommendation;
+  profile: ProfileState;
+  messages: ProjectChatMessage[];
+  question: string;
+  setQuestion: (value: string) => void;
+  onAsk: () => void;
+  onClose: () => void;
+}) {
+  const role = profile.professionLabel || profile.professionalProfile.currentDesignation || 'your target role';
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal project-modal stack" onClick={(event) => event.stopPropagation()}>
+        <div className="row between">
+          <div>
+            <span className="hero-kicker">Project Coach</span>
+            <h2 className="title" style={{ marginTop: 10 }}>{project.title}</h2>
+            <p className="body muted" style={{ marginTop: 8 }}>{project.summary}</p>
+          </div>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+        </div>
+
+        <div className="project-modal-layout">
+          <div className="stack">
+            <section className="project-section">
+              <h3 className="subtitle">Why this fits you</h3>
+              <p className="body muted">{project.why}</p>
+            </section>
+            <ProjectBullets title="Core features" items={project.features} />
+            <ProjectBullets title="Suggested stack" items={project.stack} />
+            <ProjectBullets title="Portfolio tips" items={project.portfolioTips} />
+            <ProjectBullets title="Interview talking points" items={project.interviewTalkingPoints} />
+          </div>
+
+          <aside className="project-chat-panel">
+            <div>
+              <h3 className="subtitle">Ask about this project</h3>
+              <p className="caption muted" style={{ marginTop: 6 }}>Ask about scope, stack, README, GitHub, timeline, or interview explanation.</p>
+            </div>
+            <div className="project-chat-list">
+              {messages.map((message) => (
+                <div className={`project-chat-message ${message.role}`} key={message.id}>
+                  <span className="message-label">{message.role === 'assistant' ? 'AiCoche' : 'You'}</span>
+                  <p className="body">{message.content}</p>
+                </div>
+              ))}
+            </div>
+            <div className="project-chat-input">
+              <textarea
+                className="input"
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    onAsk();
+                  }
+                }}
+                placeholder="Ask: How should I build this?"
+              />
+              <Button onClick={onAsk} disabled={!question.trim()}>Ask</Button>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectBullets({ title, items }: { title: string; items: string[] }) {
+  return (
+    <section className="project-section">
+      <h3 className="subtitle">{title}</h3>
+      <div className="project-bullet-list">
+        {items.map((item) => (
+          <span className="project-skill" key={item}>{item}</span>
+        ))}
       </div>
     </section>
   );
@@ -2557,6 +2734,193 @@ function buildUserProfile(profile: ProfileState) {
   };
 }
 
+function profileSkillPool(profile: ProfileState, metrics?: MetricsState) {
+  return compactSkills([
+    ...profile.skills,
+    ...profile.tools,
+    ...profile.professionalProfile.technicalSkills,
+    ...(metrics?.lastAnalysis?.missingSkills ?? []),
+  ]);
+}
+
+function topSkills(profile: ProfileState, metrics?: MetricsState) {
+  const skills = profileSkillPool(profile, metrics).slice(0, 5);
+  return skills.length ? skills : ['problem solving', 'portfolio storytelling', 'technical communication'];
+}
+
+function generateProjectRecommendations(profile: ProfileState, metrics: MetricsState): ProjectRecommendation[] {
+  const role = (profile.professionLabel || profile.professionalProfile.currentDesignation || profile.professionalProfile.headline || '').toLowerCase();
+  const skills = topSkills(profile, metrics);
+  const missingSkills = compactSkills(metrics.lastAnalysis?.missingSkills ?? []).slice(0, 4);
+  const needsProof = metrics.lastCvScore == null || metrics.lastCvScore < 75;
+  const level: ProjectRecommendation['difficulty'] = profile.experience === 'experienced' ? 'Advanced' : profile.experience === 'intermediate' ? 'Intermediate' : 'Beginner';
+  const sharedWhy = needsProof
+    ? 'Your profile needs stronger project proof, so this gives recruiters concrete work to review.'
+    : 'Your profile already has a base, so this project adds stronger proof around your next career step.';
+
+  if (/data|analyst|analytics|business intelligence|bi/.test(role)) {
+    return [
+      {
+        id: 'analytics-command-center',
+        title: 'Analytics Command Center',
+        difficulty: level,
+        timeline: '10-14 days',
+        summary: 'Build a dashboard that turns raw business data into KPIs, trends, and recommendations.',
+        why: `${sharedWhy} It shows SQL, dashboard thinking, and business communication in one portfolio piece.`,
+        skills: compactList(['SQL', 'Dashboard design', 'Data cleaning', ...skills, ...missingSkills]).slice(0, 6),
+        features: ['CSV/data import', 'KPI cards', 'Trend charts', 'Segment filters', 'Insight summary panel'],
+        stack: ['Next.js', 'Supabase or PostgreSQL', 'Chart library', 'CSV parser'],
+        portfolioTips: ['Add a before/after insight story', 'Include screenshots of dashboards', 'Explain the business decisions your data supports'],
+        interviewTalkingPoints: ['How you modeled the data', 'How you chose KPIs', 'How the dashboard helps a stakeholder act faster'],
+      },
+      {
+        id: 'customer-churn-lab',
+        title: 'Customer Churn Insight Lab',
+        difficulty: 'Intermediate',
+        timeline: '2 weeks',
+        summary: 'Analyze customer behavior and surface churn risks with clear retention recommendations.',
+        why: 'This is a strong analytics project because it combines data exploration with business impact.',
+        skills: compactList(['Data analysis', 'Segmentation', 'Retention metrics', ...skills]).slice(0, 6),
+        features: ['Customer table', 'Churn risk score', 'Cohort view', 'Retention suggestions', 'Exportable report'],
+        stack: ['Python or TypeScript', 'Supabase', 'Charts', 'Notebook or dashboard'],
+        portfolioTips: ['Show your assumptions clearly', 'Add a short executive summary', 'Document limitations of the dataset'],
+        interviewTalkingPoints: ['How you defined churn risk', 'Which signals mattered most', 'How you would improve the model with real data'],
+      },
+      {
+        id: 'portfolio-case-study',
+        title: 'Data Portfolio Case Study',
+        difficulty: 'Beginner',
+        timeline: '5-7 days',
+        summary: 'Create a polished case study page that explains one problem, analysis, result, and recommendation.',
+        why: 'It improves your storytelling, which is often the gap between analysis work and getting interviews.',
+        skills: compactList(['Communication', 'Visualization', 'Problem framing', ...skills]).slice(0, 6),
+        features: ['Problem statement', 'Dataset overview', 'Visual insights', 'Recommendation section', 'Downloadable report'],
+        stack: ['Next.js', 'Markdown/MDX', 'Charts'],
+        portfolioTips: ['Write for non-technical readers', 'Use simple visuals', 'Put the result near the top'],
+        interviewTalkingPoints: ['How you framed the problem', 'What tradeoffs you made', 'What action the stakeholder should take'],
+      },
+    ];
+  }
+
+  if (/product|manager|pm/.test(role)) {
+    return [
+      {
+        id: 'roadmap-prioritizer',
+        title: 'Product Roadmap Prioritizer',
+        difficulty: level,
+        timeline: '10-12 days',
+        summary: 'Build a tool that scores feature ideas by impact, effort, confidence, and strategic fit.',
+        why: `${sharedWhy} It proves product thinking, prioritization, and communication with engineering.`,
+        skills: compactList(['Prioritization', 'Product strategy', 'User stories', ...skills, ...missingSkills]).slice(0, 6),
+        features: ['Feature backlog', 'RICE scoring', 'Roadmap view', 'Decision notes', 'Stakeholder summary'],
+        stack: ['Next.js', 'Supabase', 'Simple charts'],
+        portfolioTips: ['Include your prioritization framework', 'Show examples of tradeoffs', 'Add a product brief'],
+        interviewTalkingPoints: ['How you chose the framework', 'How you handle conflicting stakeholders', 'How you measure success'],
+      },
+      {
+        id: 'user-feedback-hub',
+        title: 'User Feedback Hub',
+        difficulty: 'Intermediate',
+        timeline: '2 weeks',
+        summary: 'Collect, tag, and convert user feedback into product opportunities.',
+        why: 'This shows discovery, synthesis, and product judgment, not just documentation.',
+        skills: compactList(['User research', 'Feedback synthesis', 'Product discovery', ...skills]).slice(0, 6),
+        features: ['Feedback inbox', 'Tagging system', 'Opportunity scoring', 'Theme clusters', 'Action plan'],
+        stack: ['Next.js', 'Supabase', 'AI summarization optional'],
+        portfolioTips: ['Add sample feedback', 'Show how insights become roadmap items', 'Write a short discovery memo'],
+        interviewTalkingPoints: ['How you avoid bias', 'How you identify patterns', 'How you decide what not to build'],
+      },
+      {
+        id: 'launch-plan-builder',
+        title: 'Launch Plan Builder',
+        difficulty: 'Beginner',
+        timeline: '1 week',
+        summary: 'Create a launch checklist and messaging planner for a new product feature.',
+        why: 'It adds go-to-market and cross-functional execution proof to your portfolio.',
+        skills: compactList(['Launch planning', 'Messaging', 'Cross-functional work', ...skills]).slice(0, 6),
+        features: ['Launch checklist', 'Audience segments', 'Risk tracker', 'Success metrics', 'Post-launch review'],
+        stack: ['Next.js', 'Local storage or Supabase'],
+        portfolioTips: ['Use a realistic product example', 'Include success metrics', 'Show pre-launch and post-launch tasks'],
+        interviewTalkingPoints: ['How you define launch readiness', 'How you manage risk', 'How you evaluate launch quality'],
+      },
+    ];
+  }
+
+  return [
+    {
+      id: 'career-ai-dashboard',
+      title: 'AI Career Progress Dashboard',
+      difficulty: level,
+      timeline: '10-14 days',
+      summary: 'Build a dashboard that tracks CV strength, skills, interview practice, and weekly improvement goals.',
+      why: `${sharedWhy} It directly matches your career-coach background and gives you a polished portfolio story.`,
+      skills: compactList(['React', 'Dashboard UI', 'Auth', ...skills, ...missingSkills]).slice(0, 6),
+      features: ['User auth', 'Profile score cards', 'Skill gap tracker', 'Weekly goals', 'Progress history'],
+      stack: ['Next.js', 'Supabase', 'TypeScript', 'Charts'],
+      portfolioTips: ['Add a strong README with screenshots', 'Explain how scores are calculated', 'Deploy it and link a live demo'],
+      interviewTalkingPoints: ['How you designed the dashboard UX', 'How you structured user data', 'How you would scale the scoring system'],
+    },
+    {
+      id: 'smart-cv-reviewer',
+      title: 'Smart CV Review Tool',
+      difficulty: 'Intermediate',
+      timeline: '2 weeks',
+      summary: 'Create a CV upload flow that extracts key profile data and returns improvement suggestions.',
+      why: 'This is highly relevant for a career profile and demonstrates practical AI/product thinking.',
+      skills: compactList(['File upload', 'AI prompts', 'Profile parsing', ...skills]).slice(0, 6),
+      features: ['CV upload', 'Text extraction', 'Strength/weakness report', 'Missing skills list', 'Action checklist'],
+      stack: ['Next.js', 'Supabase Storage', 'Edge Function', 'OpenAI optional'],
+      portfolioTips: ['Show sample anonymized CV output', 'Document privacy considerations', 'Explain prompt and validation strategy'],
+      interviewTalkingPoints: ['How you handle unreliable AI output', 'How you protect user data', 'How you measure review quality'],
+    },
+    {
+      id: 'interview-practice-room',
+      title: 'Mock Interview Practice Room',
+      difficulty: profile.experience === 'beginner' ? 'Beginner' : 'Intermediate',
+      timeline: '7-10 days',
+      summary: 'Build an interview practice page with questions, answers, feedback, and saved sessions.',
+      why: 'It gives your profile a practical project that recruiters can understand quickly.',
+      skills: compactList(['Chat UI', 'State management', 'Feedback UX', ...skills, ...missingSkills]).slice(0, 6),
+      features: ['Question flow', 'Answer composer', 'Feedback cards', 'Session history', 'Score summary'],
+      stack: ['React or Next.js', 'Supabase', 'TypeScript'],
+      portfolioTips: ['Record a short demo video', 'Add sample interview sessions', 'Highlight accessibility and responsive design'],
+      interviewTalkingPoints: ['How you manage conversation state', 'How feedback is generated', 'How users can track progress'],
+    },
+  ];
+}
+
+function initialProjectMessage(project: ProjectRecommendation, profile: ProfileState) {
+  const role = profile.professionLabel || profile.professionalProfile.currentDesignation || 'your target role';
+  return `I recommend "${project.title}" for ${role}. It is a ${project.difficulty.toLowerCase()} project you can finish in ${project.timeline}. Ask me about scope, tech stack, features, README, GitHub, or how to explain it in interviews.`;
+}
+
+function buildProjectAnswer(project: ProjectRecommendation, profile: ProfileState, question: string) {
+  const normalized = question.toLowerCase();
+  const role = profile.professionLabel || profile.professionalProfile.currentDesignation || 'your target role';
+
+  if (/stack|tech|technology|framework|tool/.test(normalized)) {
+    return `For your ${role} profile, use this stack: ${project.stack.join(', ')}. Keep the first version simple, then add one advanced feature after the core flow works. This makes the project easier to finish and easier to explain.`;
+  }
+
+  if (/feature|scope|module|build|include/.test(normalized)) {
+    return `Build the scope in this order: ${project.features.join(' -> ')}. Start with the main user flow first, then polish the dashboard/reporting part. This gives you a complete demo even if you improve it later.`;
+  }
+
+  if (/readme|github|portfolio|deploy/.test(normalized)) {
+    return `For GitHub and portfolio, show: problem, target user, screenshots, live demo link, tech stack, key features, and what you learned. For this project, highlight: ${project.portfolioTips.join('; ')}.`;
+  }
+
+  if (/interview|explain|talk|present/.test(normalized)) {
+    return `In interviews, explain this project around impact and decisions: ${project.interviewTalkingPoints.join('; ')}. Also mention why you chose this project: ${project.why}`;
+  }
+
+  if (/time|timeline|days|week|plan|milestone/.test(normalized)) {
+    return `Plan it across ${project.timeline}: first build the core flow, then add data/state handling, then polish UI, then write README and deploy. Do not start with advanced features before the basic demo is working.`;
+  }
+
+  return `For "${project.title}", focus on the parts that improve your ${role} profile: ${project.skills.slice(0, 4).join(', ')}. The main reason to build it is: ${project.why} A strong next step is to define the smallest demo you can finish in 2-3 days, then expand it into the full version.`;
+}
+
 function labelExperience(value: Experience | null) {
   if (value === 'beginner') return 'Beginner (0-1 years)';
   if (value === 'intermediate') return 'Intermediate (1-3 years)';
@@ -3265,15 +3629,17 @@ function TagEditor({ label, items, onChange }: { label: string; items: string[];
 function WebHeader({
   active,
   setView,
-  profile,
-  user,
+  theme,
+  setTheme,
   usage,
+  onSignOut,
 }: {
   active: Tab | null;
   setView: (view: View) => void;
-  profile: ProfileState;
-  user: User | null;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
   usage: UsageState;
+  onSignOut: () => void;
 }) {
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: 'home', label: 'Home', icon: '' },
@@ -3318,9 +3684,21 @@ function WebHeader({
 
         <div className="header-actions">
           <span className="chip">{usage.plan === 'pro' ? 'Pro' : 'Free'}</span>
-          <button className="chip" onClick={() => navigate('profile')} title="Open profile">
-            <Avatar profile={profile} user={user} />
-            <span>{profile.professionalProfile.fullName || displayNameFor(user)}</span>
+          <button
+            className="header-icon-button"
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            type="button"
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>
+            {theme === 'dark' ? '☀' : '☾'}
+          </button>
+          <button
+            className="header-icon-button danger"
+            onClick={onSignOut}
+            type="button"
+            aria-label="Sign out"
+            title="Sign out">
+            ⎋
           </button>
         </div>
       </div>

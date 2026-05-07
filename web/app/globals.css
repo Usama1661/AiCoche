@@ -11,10 +11,10 @@
   --text-inverse: #ffffff;
   --primary: #a855f7;
   --primary-dark: #7c3aed;
-  --primary-strong: #ec4899;
-  --primary-light: #f0abfc;
-  --secondary-pink: #fb7185;
-  --peach: #fbbaa1;
+  --primary-strong: #2563eb;
+  --primary-light: #c4b5fd;
+  --secondary-pink: #38bdf8;
+  --peach: #93c5fd;
   --mint: #85e6c5;
   --gold: #fbbf24;
   --success: #4ade80;
@@ -26,7 +26,7 @@
   --warning-tint: rgba(251, 191, 36, 0.14);
   --error-tint: rgba(248, 113, 113, 0.14);
   --info-tint: rgba(96, 165, 250, 0.14);
-  --glow: rgba(236, 72, 153, 0.28);
+  --glow: rgba(99, 102, 241, 0.28);
   --shadow-soft: 0 26px 90px rgba(22, 13, 36, 0.28);
   --shadow-strong: 0 34px 120px rgba(14, 8, 26, 0.42);
   --radius-lg: 28px;
@@ -34,22 +34,22 @@
 }
 
 [data-theme='light'] {
-  --bg: #fff7f1;
-  --surface: #fff1e8;
-  --card: rgba(255, 255, 255, 0.84);
+  --bg: #f7f8ff;
+  --surface: #eef2ff;
+  --card: rgba(255, 255, 255, 0.88);
   --elevated: rgba(255, 255, 255, 0.95);
-  --border: rgba(100, 68, 112, 0.14);
-  --border-muted: rgba(100, 68, 112, 0.22);
-  --text: #211629;
-  --text-secondary: #675871;
-  --text-muted: #887b91;
-  --primary: #9d4edd;
+  --border: rgba(51, 65, 85, 0.12);
+  --border-muted: rgba(51, 65, 85, 0.2);
+  --text: #172033;
+  --text-secondary: #536179;
+  --text-muted: #7a879a;
+  --primary: #7c3aed;
   --primary-dark: #6d28d9;
-  --primary-strong: #e9488b;
-  --primary-light: #c084fc;
-  --secondary-pink: #ef5d86;
-  --peach: #ffb89c;
-  --mint: #4cc9a4;
+  --primary-strong: #2563eb;
+  --primary-light: #8b5cf6;
+  --secondary-pink: #0284c7;
+  --peach: #60a5fa;
+  --mint: #14b8a6;
   --gold: #d97706;
   --success: #16a34a;
   --warning: #d97706;
@@ -60,9 +60,9 @@
   --warning-tint: rgba(217, 119, 6, 0.12);
   --error-tint: rgba(220, 38, 38, 0.1);
   --info-tint: rgba(37, 99, 235, 0.1);
-  --glow: rgba(239, 93, 134, 0.22);
-  --shadow-soft: 0 26px 90px rgba(102, 74, 62, 0.14);
-  --shadow-strong: 0 34px 120px rgba(102, 74, 62, 0.2);
+  --glow: rgba(79, 70, 229, 0.2);
+  --shadow-soft: 0 26px 90px rgba(42, 54, 89, 0.12);
+  --shadow-strong: 0 34px 120px rgba(42, 54, 89, 0.18);
 }
 
 * {
@@ -98,9 +98,9 @@ button {
 .app-shell {
   min-height: 100vh;
   background:
-    radial-gradient(circle at 84% 8%, color-mix(in srgb, var(--peach) 34%, transparent), transparent 28rem),
-    radial-gradient(circle at 10% 14%, color-mix(in srgb, var(--primary) 28%, transparent), transparent 30rem),
-    radial-gradient(circle at 52% 42%, color-mix(in srgb, var(--secondary-pink) 14%, transparent), transparent 38rem),
+    radial-gradient(circle at 84% 8%, color-mix(in srgb, var(--peach) 22%, transparent), transparent 28rem),
+    radial-gradient(circle at 10% 14%, color-mix(in srgb, var(--primary) 22%, transparent), transparent 30rem),
+    radial-gradient(circle at 52% 42%, color-mix(in srgb, var(--secondary-pink) 10%, transparent), transparent 38rem),
     var(--bg);
 }
 
@@ -212,7 +212,7 @@ button.card:hover,
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--secondary-pink) 28%, transparent), transparent 15rem),
+    radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--secondary-pink) 18%, transparent), transparent 15rem),
     linear-gradient(135deg, color-mix(in srgb, var(--primary) 28%, #1e1235), #171124 58%, var(--card));
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -258,8 +258,8 @@ button.card:hover,
 
 [data-theme='light'] .hero-card {
   background:
-    radial-gradient(circle at 82% 12%, rgba(255, 184, 156, 0.46), transparent 14rem),
-    linear-gradient(135deg, #ffffff, #fff4ec 58%, #fbedf5);
+    radial-gradient(circle at 82% 12%, rgba(96, 165, 250, 0.22), transparent 14rem),
+    linear-gradient(135deg, #ffffff, #f7f9ff 58%, #eef4ff);
 }
 
 [data-theme='light'] .card,
@@ -680,6 +680,35 @@ textarea.input {
   font-size: 11px;
 }
 
+.header-icon-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary-tint) 76%, var(--elevated));
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--primary) 10%, transparent);
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.header-icon-button:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--primary) 54%, var(--border));
+  background: color-mix(in srgb, var(--primary-tint) 92%, var(--elevated));
+}
+
+.header-icon-button.danger {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error-tint) 78%, var(--elevated));
+  border-color: color-mix(in srgb, var(--error) 20%, var(--border));
+}
+
 .home-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.12fr) minmax(380px, 0.88fr);
@@ -764,8 +793,8 @@ textarea.input {
   border: 1px solid var(--border);
   border-radius: 42px;
   background:
-    radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--peach) 38%, transparent), transparent 16rem),
-    radial-gradient(circle at 8% 24%, color-mix(in srgb, var(--primary) 24%, transparent), transparent 18rem),
+    radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--peach) 20%, transparent), transparent 16rem),
+    radial-gradient(circle at 8% 24%, color-mix(in srgb, var(--primary) 18%, transparent), transparent 18rem),
     var(--card);
   box-shadow: var(--shadow-strong);
   backdrop-filter: blur(22px);
@@ -832,8 +861,8 @@ textarea.input {
   border: 1px solid var(--border);
   border-radius: 42px;
   background:
-    radial-gradient(circle at 84% 8%, color-mix(in srgb, var(--peach) 32%, transparent), transparent 18rem),
-    radial-gradient(circle at 12% 30%, color-mix(in srgb, var(--primary) 26%, transparent), transparent 22rem),
+    radial-gradient(circle at 84% 8%, color-mix(in srgb, var(--peach) 20%, transparent), transparent 18rem),
+    radial-gradient(circle at 12% 30%, color-mix(in srgb, var(--primary) 20%, transparent), transparent 22rem),
     var(--card);
   box-shadow: var(--shadow-strong);
 }
@@ -1091,6 +1120,179 @@ textarea.input {
   height: 36px;
   border-radius: 13px;
   font-size: 16px;
+}
+
+.project-recommendation-panel {
+  gap: 18px;
+}
+
+.project-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.project-card {
+  min-height: 210px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  display: grid;
+  align-content: space-between;
+  gap: 18px;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 90% 8%, color-mix(in srgb, var(--primary) 13%, transparent), transparent 9rem),
+    color-mix(in srgb, var(--surface) 72%, transparent);
+  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.project-card:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
+  box-shadow: var(--shadow-soft);
+  background:
+    radial-gradient(circle at 90% 8%, color-mix(in srgb, var(--primary) 20%, transparent), transparent 10rem),
+    color-mix(in srgb, var(--elevated) 82%, transparent);
+}
+
+.project-skill-row,
+.project-bullet-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-skill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--primary-light);
+  background: color-mix(in srgb, var(--primary-tint) 74%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent);
+  font-size: 10.5px;
+  line-height: 1.2;
+  font-weight: 900;
+}
+
+[data-theme='light'] .project-skill {
+  color: var(--primary-dark);
+}
+
+.modal.project-modal {
+  width: calc(100vw - 32px);
+  max-width: 1280px;
+  height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: clamp(18px, 2.4vw, 28px);
+}
+
+.project-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.project-detail-card,
+.project-section,
+.project-chat-panel {
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.project-detail-card {
+  min-height: 58px;
+  padding: 10px 12px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.project-detail-card strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.project-modal-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 0.9fr);
+  gap: 16px;
+  align-items: stretch;
+  min-height: 0;
+  height: 100%;
+}
+
+.project-modal-layout > .stack {
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.project-section {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.project-chat-panel {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 16px;
+}
+
+.project-chat-list {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.project-chat-message {
+  max-width: 92%;
+  border: 1px solid var(--border);
+  border-radius: 18px 18px 18px 6px;
+  padding: 11px 12px;
+  background: color-mix(in srgb, var(--elevated) 82%, transparent);
+}
+
+.project-chat-message.user {
+  align-self: flex-end;
+  color: #ffffff;
+  border-color: transparent;
+  border-radius: 18px 18px 6px 18px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+}
+
+.project-chat-message.user .body,
+.project-chat-message.user .message-label {
+  color: #ffffff;
+}
+
+.project-chat-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.project-chat-input textarea.input {
+  min-height: 74px;
+  max-height: 130px;
+  resize: vertical;
 }
 
 .dashboard-side {
@@ -1917,12 +2119,14 @@ textarea.input {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
-  padding: 20px;
+  z-index: 100;
+  padding: 16px;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   display: grid;
   place-items: center;
   backdrop-filter: blur(18px);
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .modal {
@@ -2254,6 +2458,9 @@ textarea.input.chat-textarea {
   .quick-action-grid,
   .metric-grid,
   .three-grid,
+  .project-card-grid,
+  .project-detail-grid,
+  .project-modal-layout,
   .dashboard-action-grid,
   .analysis-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2371,9 +2578,28 @@ textarea.input.chat-textarea {
   .quick-action-grid,
   .metric-grid,
   .three-grid,
+  .project-card-grid,
+  .project-detail-grid,
+  .project-modal-layout,
   .dashboard-action-grid,
   .analysis-steps {
     grid-template-columns: 1fr;
+  }
+
+  .project-chat-panel {
+    min-height: 420px;
+    height: auto;
+  }
+
+  .project-chat-input {
+    grid-template-columns: 1fr;
+  }
+
+  .modal.project-modal {
+    width: calc(100vw - 18px);
+    height: calc(100dvh - 18px);
+    max-height: calc(100dvh - 18px);
+    padding: 18px;
   }
 
   .dashboard-head {
