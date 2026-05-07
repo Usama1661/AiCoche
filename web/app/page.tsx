@@ -1034,10 +1034,17 @@ function Splash({ onDone }: { onDone: () => void }) {
   }, [onDone]);
 
   return (
-    <section className="screen narrow stack" style={{ minHeight: '100vh', placeContent: 'center', textAlign: 'center' }}>
-      <div className="icon-box" style={{ width: 72, height: 72, borderRadius: 18, margin: '0 auto' }}>A</div>
-      <h1 className="display">AiCoche</h1>
-      <p className="body muted">Your AI Career Coach</p>
+    <section className="screen narrow entry-shell" style={{ textAlign: 'center' }}>
+      <div className="entry-card stack">
+        <span className="floating-orb one" aria-hidden="true">CV</span>
+        <span className="floating-orb two" aria-hidden="true">AI</span>
+        <div className="brand-mark" style={{ width: 82, height: 82, borderRadius: 26, margin: '0 auto' }}>A</div>
+        <span className="hero-kicker" style={{ margin: '0 auto' }}>AI Career Coach</span>
+        <h1 className="display">AiCoche</h1>
+        <p className="body muted" style={{ maxWidth: 460, margin: '0 auto' }}>
+          A calmer way to improve your CV, prepare interviews, and move your career forward.
+        </p>
+      </div>
     </section>
   );
 }
@@ -1090,9 +1097,13 @@ function Auth({ mode, setUser, setProfile, setView, setBusy, setError, busy }: C
   }
 
   return (
-    <section className="screen narrow stack" style={{ minHeight: '100vh', placeContent: 'center' }}>
-      <div className="icon-box" style={{ width: 90, height: 90, borderRadius: 24, margin: '0 auto' }}>▣</div>
-      <div style={{ textAlign: 'center' }}>
+    <section className="screen narrow entry-shell">
+      <div className="entry-card auth-card stack">
+        <div className="brand-mark" style={{ width: 76, height: 76, borderRadius: 24, margin: '0 auto' }}>A</div>
+        <div style={{ textAlign: 'center' }}>
+        <span className="hero-kicker" style={{ margin: '0 auto 12px' }}>
+          {mode === 'login' ? 'Welcome back' : 'Start free'}
+        </span>
         <h1 className="display">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h1>
         <p className="body muted" style={{ marginTop: 8 }}>
           {mode === 'login' ? 'Sign in to continue your career journey' : 'Start your career growth journey today'}
@@ -1107,6 +1118,7 @@ function Auth({ mode, setUser, setProfile, setView, setBusy, setError, busy }: C
         <button className="button ghost" onClick={() => setView(mode === 'login' ? 'signup' : 'login')}>
           {mode === 'login' ? 'Sign Up' : 'Sign In'}
         </button>
+      </div>
       </div>
     </section>
   );
@@ -1129,6 +1141,7 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
   const exactMatch = professions.some((p) => p[1].toLowerCase() === query.trim().toLowerCase());
   const showOther = query.trim().length > 0 && !exactMatch;
   const popularFields = ['Software Engineer', 'Frontend Developer', 'Data Analyst', 'UI/UX Designer', 'Product Manager', 'Digital Marketer'];
+  const suggestedLanguages = ['English', 'Spanish', 'French'];
   const canContinue = step === 0 ? profession : step === 1 ? experience : step === 2 ? goal : true;
 
   function chooseProfession(key: string, label: string) {
@@ -1174,11 +1187,12 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
   return (
     <section className="screen onboarding-shell">
       <div className="onboarding-card">
-        <div className="stack">
+        <div className="stack dashboard-hero-copy">
           <div className="brand" style={{ cursor: 'default' }}>
             <span className="brand-mark">A</span>
             <span>AiCoche</span>
           </div>
+          <span className="hero-kicker">Personalized setup</span>
           <div className="progress"><span style={{ width: `${((step + 1) / 4) * 100}%` }} /></div>
           <p className="body muted">Step {step + 1} of 4</p>
           <div>
@@ -1186,16 +1200,28 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
               {step === 0 ? "What's your profession?" : step === 1 ? 'Experience Level' : step === 2 ? 'Career Goal' : 'Preferred Language'}
             </h1>
             <p className="body muted" style={{ marginTop: 12 }}>
-              {step === 0 ? 'Search a field, pick a recommendation, or add your own.' : step === 1 ? 'How many years of experience do you have?' : step === 2 ? 'What are you aiming to achieve?' : 'Choose the language for coaching sessions'}
+              {step === 0 ? 'Search a field, pick a recommendation, or add your own.' : step === 1 ? 'How many years of experience do you have?' : step === 2 ? 'What are you aiming to achieve?' : 'Choose from suggested coaching languages.'}
             </p>
           </div>
           <div className="card stack">
             <p className="label">Why we ask</p>
             <p className="body muted">AiCoche personalizes CV feedback, quiz prompts, and mock interview questions around your target field and experience.</p>
           </div>
+          <div className="hero-stat-grid">
+            <div className="soft-stat">
+              <span className="label">Coach mode</span>
+              <span className="soft-stat-value">24/7</span>
+              <span className="soft-stat-label">Practice whenever you are ready</span>
+            </div>
+            <div className="soft-stat">
+              <span className="label">Setup</span>
+              <span className="soft-stat-value">4</span>
+              <span className="soft-stat-label">Steps to personalize AiCoche</span>
+            </div>
+          </div>
         </div>
 
-        <div className="stack">
+        <div className="card stack">
       {step === 0 ? (
         <div className="stack">
           <div className="search-wrap">
@@ -1291,7 +1317,7 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
       ) : null}
       {step === 3 ? (
         <div className="stack">
-          {['English', 'Spanish', 'French', 'German', 'Chinese', 'Japanese', 'Portuguese', 'Russian', 'Arabic', 'Hindi'].map((lang) => (
+          {suggestedLanguages.map((lang) => (
             <Choice key={lang} selected={language === lang} onClick={() => setLanguage(lang)}>
               <span className="subtitle">{lang}</span>
               {language === lang ? <span className="chip">Selected</span> : null}
@@ -1348,18 +1374,50 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
 
   return (
     <section className="screen dashboard-screen">
-      <div className="dashboard-head">
-        <div className="row" style={{ minWidth: 0 }}>
-          <Avatar profile={profile} user={user} />
-          <div style={{ minWidth: 0 }}>
+      <div className="dashboard-hero">
+        <div className="dashboard-hero-copy">
+          <div className="row" style={{ minWidth: 0, gap: 16 }}>
+            <Avatar profile={profile} user={user} />
+            <span className="hero-kicker">AI Career Workspace</span>
+          </div>
+          <div>
             <p className="body muted">Welcome back,</p>
             <h1 className="dashboard-name">{dashboardName}</h1>
             <p className="dashboard-title">{dashboardTitle}</p>
           </div>
+          <p className="body muted" style={{ maxWidth: 620 }}>
+            Build a stronger profile, improve your CV, and practice interviews in one focused place.
+          </p>
+          <div className="dashboard-hero-actions">
+            <Button onClick={() => setView('cv-upload')}>Upload CV</Button>
+            <Button variant="secondary" onClick={() => setView('interview-session')}>Start Interview</Button>
+            <button className="chip" onClick={() => setUsage((u) => ({ ...u, plan: u.plan === 'pro' ? 'free' : 'pro' }))}>
+              {usage.plan === 'pro' ? 'Pro Workspace' : 'Free Workspace'}
+            </button>
+          </div>
         </div>
-        <button className="chip" onClick={() => setUsage((u) => ({ ...u, plan: u.plan === 'pro' ? 'free' : 'pro' }))}>
-          {usage.plan === 'pro' ? 'Pro Workspace' : 'Free Workspace'}
-        </button>
+        <div className="hero-stat-grid" aria-label="Career progress snapshot">
+          <div className="soft-stat">
+            <span className="label">Profile</span>
+            <span className="soft-stat-value">{profileCompletion}%</span>
+            <span className="soft-stat-label">Strength score</span>
+          </div>
+          <div className="soft-stat">
+            <span className="label">CV Score</span>
+            <span className="soft-stat-value">{metrics.lastCvScore ?? '--'}</span>
+            <span className="soft-stat-label">Latest review</span>
+          </div>
+          <div className="soft-stat">
+            <span className="label">Interview</span>
+            <span className="soft-stat-value">{metrics.lastInterviewScore ?? '--'}</span>
+            <span className="soft-stat-label">Practice score</span>
+          </div>
+          <div className="soft-stat">
+            <span className="label">Quiz</span>
+            <span className="soft-stat-value">{metrics.lastQuizScore != null ? `${metrics.lastQuizScore}%` : '--'}</span>
+            <span className="soft-stat-label">{metrics.lastQuizLevel ?? 'AI readiness'}</span>
+          </div>
+        </div>
       </div>
 
       <div className="dashboard-layout">
@@ -3260,6 +3318,10 @@ function WebHeader({
 
         <div className="header-actions">
           <span className="chip">{usage.plan === 'pro' ? 'Pro' : 'Free'}</span>
+          <button className="chip" onClick={() => navigate('profile')} title="Open profile">
+            <Avatar profile={profile} user={user} />
+            <span>{profile.professionalProfile.fullName || displayNameFor(user)}</span>
+          </button>
         </div>
       </div>
     </header>
