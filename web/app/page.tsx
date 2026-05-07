@@ -56,6 +56,8 @@ type ProfileState = {
   skills: string[];
   tools: string[];
   projects: string[];
+  activeRecommendedProjectIds: string[];
+  completedRecommendedProjectIds: string[];
   professionalProfile: ProfessionalProfile;
 };
 
@@ -183,6 +185,8 @@ type RemoteProfileRow = {
   skills?: unknown;
   tools?: unknown;
   projects?: unknown;
+  activeRecommendedProjectIds?: unknown;
+  completedRecommendedProjectIds?: unknown;
   professionalProfile?: Partial<ProfessionalProfile> & {
     experiences?: unknown;
     education?: unknown;
@@ -299,6 +303,8 @@ const initialProfile: ProfileState = {
   skills: [],
   tools: [],
   projects: [],
+  activeRecommendedProjectIds: [],
+  completedRecommendedProjectIds: [],
   professionalProfile: emptyProfessionalProfile,
 };
 
@@ -361,6 +367,12 @@ function normalizeProfileState(profile: ProfileState): ProfileState {
   return {
     ...initialProfile,
     ...profile,
+    activeRecommendedProjectIds: Array.isArray(profile.activeRecommendedProjectIds)
+      ? profile.activeRecommendedProjectIds.map(text).filter(Boolean)
+      : [],
+    completedRecommendedProjectIds: Array.isArray(profile.completedRecommendedProjectIds)
+      ? profile.completedRecommendedProjectIds.map(text).filter(Boolean)
+      : [],
     professionalProfile: {
       ...emptyProfessionalProfile,
       ...(profile.professionalProfile ?? {}),
@@ -694,6 +706,14 @@ function mergeRemoteProfile(remote: unknown, fallback: ProfileState): ProfileSta
     skills: compactSkills([...technicalSkills, ...stringList(data.skills), ...fallback.skills]),
     tools: compactSkills([...toolSkills, ...stringList(data.tools), ...fallback.tools]),
     projects: compactList([...projects, ...stringList(data.projects), ...fallback.projects]),
+    activeRecommendedProjectIds: compactList([
+      ...stringList(data.activeRecommendedProjectIds),
+      ...fallback.activeRecommendedProjectIds,
+    ]),
+    completedRecommendedProjectIds: compactList([
+      ...stringList(data.completedRecommendedProjectIds),
+      ...fallback.completedRecommendedProjectIds,
+    ]),
     professionalProfile: {
       ...fallback.professionalProfile,
       ...professional,
@@ -1452,12 +1472,7 @@ function Onboarding({ user, profile, setProfile, setView, setError }: Pick<Commo
   );
 }
 
-function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps) {
-  const profileCompletion = Math.round(
-    ([profile.avatarUrl, profile.professionLabel, profile.professionalProfile.bio, profile.skills.length, profile.tools.length, profile.projects.length].filter(Boolean).length / 6) * 100
-  );
-  const completedProfileItems = Math.round((profileCompletion / 100) * 6);
-  const remainingProfileItems = Math.max(0, 6 - completedProfileItems);
+function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, setError }: CommonProps) {
   const motivation = useMemo(() => {
     return MOTIVATIONAL_QUOTES[new Date().getDate() % MOTIVATIONAL_QUOTES.length];
   }, []);
@@ -1469,7 +1484,7 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
   const [projectRecommendations, setProjectRecommendations] = useState<ProjectRecommendation[]>([]);
   const [projectSessionId, setProjectSessionId] = useState<string | null>(null);
   const [projectChats, setProjectChats] = useState<Record<string, ProjectChatMessage[]>>({});
-  const [completedProjectIds, setCompletedProjectIds] = useState<string[]>([]);
+  const [completedProjectIds, setCompletedProjectIds] = useState<string[]>(profile.completedRecommendedProjectIds);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectChatLoading, setProjectChatLoading] = useState(false);
   const [projectCompleteLoading, setProjectCompleteLoading] = useState(false);
@@ -1488,13 +1503,18 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
     setProjectRecommendations([]);
     setProjectSessionId(null);
     setProjectChats({});
-    setCompletedProjectIds([]);
+    setCompletedProjectIds(profile.completedRecommendedProjectIds);
 
     setProjectsLoading(true);
     if (!hasSupabase || !supabase || !user) {
       window.setTimeout(() => {
         if (!active) return;
         setProjectRecommendations(fallbackProjectRecommendations);
+        const fallbackIds = fallbackProjectRecommendations.map((project) => project.id);
+        if (!sameStringSet(fallbackIds, profile.activeRecommendedProjectIds)) {
+          setProfile((current) => ({ ...current, activeRecommendedProjectIds: fallbackIds }));
+        }
+        setCompletedProjectIds(profile.completedRecommendedProjectIds);
         setProjectsLoading(false);
       }, 450);
       return () => {
@@ -1510,28 +1530,94 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
           metrics: buildProjectMetricsSnapshot(metrics),
         },
       })
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         if (!active) return;
         if (error || data?.error) {
           console.warn('AI project recommendations failed; using local fallback.', error ?? data?.error);
           setProjectRecommendations(fallbackProjectRecommendations);
+          const fallbackIds = fallbackProjectRecommendations.map((project) => project.id);
+          if (!sameStringSet(fallbackIds, profile.activeRecommendedProjectIds)) {
+            setProfile((current) => ({ ...current, activeRecommendedProjectIds: fallbackIds }));
+          }
+          setCompletedProjectIds(profile.completedRecommendedProjectIds);
           return;
         }
-        if (data?.sessionId) setProjectSessionId(data.sessionId);
-        if (Array.isArray(data?.recommendations) && data.recommendations.length) {
-          setProjectRecommendations(data.recommendations);
+
+        let recommendationData = data;
+        const returnedProjectIds = Array.isArray(recommendationData?.recommendations)
+          ? recommendationData.recommendations.map((project) => project.id)
+          : [];
+        const returnedCompletedIds = Array.isArray(recommendationData?.completedProjectIds)
+          ? recommendationData.completedProjectIds
+          : [];
+        const returnedCompletedForBatch = mergeCompletedProjectIds(
+          profile.completedRecommendedProjectIds.filter((projectId) => returnedProjectIds.includes(projectId)),
+          returnedCompletedIds.filter((projectId) => returnedProjectIds.includes(projectId))
+        );
+        const returnedBatchComplete = returnedProjectIds.length >= 3 &&
+          returnedProjectIds.every((projectId) => returnedCompletedForBatch.includes(projectId));
+
+        if (returnedBatchComplete) {
+          const fresh = await supabase.functions.invoke<ProjectCoachRecommendResponse>('project-coach', {
+            body: {
+              action: 'recommend',
+              forceNew: true,
+              profile: buildUserProfile(profile),
+              metrics: buildProjectMetricsSnapshot(metrics),
+            },
+          });
+          if (
+            active &&
+            !fresh.error &&
+            !fresh.data?.error &&
+            Array.isArray(fresh.data?.recommendations) &&
+            fresh.data.recommendations.length
+          ) {
+            recommendationData = fresh.data;
+          }
         }
-        if (data?.chats && typeof data.chats === 'object') {
-          setProjectChats(data.chats);
+
+        if (!active) return;
+        if (recommendationData?.sessionId) setProjectSessionId(recommendationData.sessionId);
+        if (Array.isArray(recommendationData?.recommendations) && recommendationData.recommendations.length) {
+          setProjectRecommendations(recommendationData.recommendations);
         }
-        if (Array.isArray(data?.completedProjectIds)) {
-          setCompletedProjectIds(data.completedProjectIds);
+        if (recommendationData?.chats && typeof recommendationData.chats === 'object') {
+          setProjectChats(recommendationData.chats);
+        }
+        if (Array.isArray(recommendationData?.completedProjectIds)) {
+          const activeProjectIds = Array.isArray(recommendationData.recommendations)
+            ? recommendationData.recommendations.map((project) => project.id)
+            : [];
+          const remoteCompletedIds = recommendationData.completedProjectIds.filter((projectId) => activeProjectIds.includes(projectId));
+          const localCompletedIds = profile.completedRecommendedProjectIds.filter((projectId) => activeProjectIds.includes(projectId));
+          const mergedIds = mergeCompletedProjectIds(localCompletedIds, remoteCompletedIds);
+          setCompletedProjectIds(mergedIds);
+          if (
+            !sameStringSet(activeProjectIds, profile.activeRecommendedProjectIds) ||
+            !sameStringSet(mergedIds, profile.completedRecommendedProjectIds)
+          ) {
+            const mergedProfile = {
+              ...profile,
+              activeRecommendedProjectIds: activeProjectIds,
+              completedRecommendedProjectIds: mergedIds,
+            };
+            setProfile(mergedProfile);
+            void saveProfileSnapshot(mergedProfile, user).catch((saveError) => {
+              setError(saveError instanceof Error ? saveError.message : 'Could not save completed projects to profile.');
+            });
+          }
         }
       })
       .catch((error) => {
         if (active) {
           console.warn('AI project recommendations failed; using local fallback.', error);
           setProjectRecommendations(fallbackProjectRecommendations);
+          const fallbackIds = fallbackProjectRecommendations.map((project) => project.id);
+          if (!sameStringSet(fallbackIds, profile.activeRecommendedProjectIds)) {
+            setProfile((current) => ({ ...current, activeRecommendedProjectIds: fallbackIds }));
+          }
+          setCompletedProjectIds(profile.completedRecommendedProjectIds);
         }
       })
       .finally(() => {
@@ -1601,7 +1687,20 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
   async function completeSelectedProject() {
     if (!selectedProject) return;
     const optimistic = Array.from(new Set([...completedProjectIds, selectedProject.id]));
-    setCompletedProjectIds(optimistic);
+    const activeProjectIds = projectRecommendations.length
+      ? projectRecommendations.map((project) => project.id)
+      : profile.activeRecommendedProjectIds;
+    const activeCompletedIds = optimistic.filter((projectId) => activeProjectIds.includes(projectId));
+    setCompletedProjectIds(activeCompletedIds);
+    const nextProfile = {
+      ...profile,
+      activeRecommendedProjectIds: activeProjectIds,
+      completedRecommendedProjectIds: activeCompletedIds,
+    };
+    setProfile(nextProfile);
+    void saveProfileSnapshot(nextProfile, user).catch((error) => {
+      setError(error instanceof Error ? error.message : 'Could not save completed project to profile.');
+    });
 
     if (!hasSupabase || !supabase || !projectSessionId) return;
 
@@ -1616,7 +1715,14 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
     setProjectCompleteLoading(false);
 
     if (!error && !data?.error && Array.isArray(data?.completedProjectIds)) {
-      setCompletedProjectIds(data.completedProjectIds);
+      const savedIds = mergeCompletedProjectIds(activeCompletedIds, data.completedProjectIds)
+        .filter((projectId) => activeProjectIds.includes(projectId));
+      setCompletedProjectIds(savedIds);
+      const savedProfile = { ...nextProfile, completedRecommendedProjectIds: savedIds };
+      setProfile(savedProfile);
+      void saveProfileSnapshot(savedProfile, user).catch((saveError) => {
+        setError(saveError instanceof Error ? saveError.message : 'Could not save completed project to profile.');
+      });
       return;
     }
 
@@ -1628,19 +1734,50 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
     { title: 'Data Analyst', detail: 'Sharpen SQL, dashboards, stakeholder communication, and metrics.' },
     { title: 'Product Manager', detail: 'Prepare product sense, prioritization, and launch examples.' },
   ];
-  const nextSteps = [
-    profileCompletion < 60 ? 'Complete your professional profile' : 'Refresh your profile with recent wins',
-    metrics.lastCvScore == null ? 'Upload and analyze your CV' : 'Improve your CV based on the latest analysis',
-    metrics.lastInterviewScore == null ? 'Start a mock interview' : 'Retake interview practice for a higher score',
-  ];
   const dashboardName = profile.professionalProfile.fullName || displayNameFor(user);
   const dashboardTitle = profile.professionalProfile.currentDesignation || profile.professionLabel || profile.professionalProfile.headline || 'Career profile';
   const dashboardQuizScore = overallQuizScore(normalizedQuizScores(metrics));
+  const recommendedProjectIds = projectRecommendations.map((project) => project.id);
+  const activeBatchProjectIds = recommendedProjectIds.length > 0 ? recommendedProjectIds : profile.activeRecommendedProjectIds;
+  const projectProofDone = activeBatchProjectIds.length >= 3 &&
+    activeBatchProjectIds.every((projectId) => completedProjectIds.includes(projectId));
+  const profileStrengthItems = [
+    profile.avatarUrl,
+    profile.professionLabel,
+    profile.professionalProfile.bio,
+    profile.skills.length,
+    profile.tools.length,
+    profile.projects.length,
+    projectProofDone,
+  ];
+  const completedProfileItems = profileStrengthItems.filter(Boolean).length;
+  const profileCompletion = Math.round((completedProfileItems / profileStrengthItems.length) * 100);
+  const remainingProfileItems = Math.max(0, profileStrengthItems.length - completedProfileItems);
+  const nextSteps = [
+    !projectProofDone ? 'Complete your recommended portfolio projects' : profileCompletion < 60 ? 'Complete your professional profile' : 'Refresh your profile with recent wins',
+    metrics.lastCvScore == null ? 'Upload and analyze your CV' : 'Improve your CV based on the latest analysis',
+    metrics.lastInterviewScore == null ? 'Start a mock interview' : 'Retake interview practice for a higher score',
+  ];
   const nextStepActions: Array<{ label: string; action: () => void }> = [
     { label: nextSteps[0], action: () => setView('professional-profile') },
     { label: nextSteps[1], action: () => setView(metrics.lastCvScore == null ? 'cv-upload' : 'cv-analysis') },
     { label: nextSteps[2], action: () => setView('interview-session') },
   ];
+  const projectActivity = projectRecommendations
+    .map((project) => {
+      const messages = projectChats[project.id] ?? [];
+      const userMessages = messages.filter((message) => message.role === 'user');
+      const completed = completedProjectIds.includes(project.id);
+      const lastMessage = [...messages].reverse().find((message) => text(message.content));
+      return {
+        project,
+        completed,
+        messages,
+        userMessageCount: userMessages.length,
+        lastMessage,
+      };
+    })
+    .filter((item) => item.completed || item.userMessageCount > 0);
 
   return (
     <>
@@ -1710,7 +1847,7 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
               <h3 className="subtitle">Profile strength</h3>
               <div className="progress"><span style={{ width: `${profileCompletion}%` }} /></div>
               <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
-                <span className="mini-pill success">{completedProfileItems}/6 done</span>
+                <span className="mini-pill success">{completedProfileItems}/{profileStrengthItems.length} done</span>
                 <span className="mini-pill warning">{remainingProfileItems} left</span>
               </div>
             </div>
@@ -1770,6 +1907,39 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
                 </button>
               ))}
             </div>
+            {!projectsLoading && projectActivity.length ? (
+              <div className="project-activity-section stack">
+                <div className="row between dashboard-section-title">
+                  <div>
+                    <span className="hero-kicker">Project Activity</span>
+                    <h3 className="subtitle" style={{ marginTop: 8 }}>In-progress and completed projects</h3>
+                  </div>
+                  <p className="caption muted">Open any project to continue the saved chat.</p>
+                </div>
+                <div className="project-activity-list">
+                  {projectActivity.map(({ project, completed, messages, userMessageCount, lastMessage }) => (
+                    <button className="project-activity-card" key={`activity-${project.id}`} onClick={() => openProject(project)} type="button">
+                      <div className="row between">
+                        <span className={`mini-pill ${completed ? 'success' : 'warning'}`}>
+                          {completed ? 'Completed' : 'In progress'}
+                        </span>
+                        <span className="caption muted">{userMessageCount} {userMessageCount === 1 ? 'question' : 'questions'}</span>
+                      </div>
+                      <div>
+                        <h4 className="subtitle" style={{ fontSize: 15 }}>{project.title}</h4>
+                        <p className="caption muted project-activity-preview">
+                          {lastMessage?.content ? lastMessage.content : 'No chat yet. Open this project to continue.'}
+                        </p>
+                      </div>
+                      <div className="row between">
+                        <span className="caption muted">{messages.length} saved messages</span>
+                        <span className="caption" style={{ color: 'var(--primary)', fontWeight: 900 }}>Continue chat</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -2136,6 +2306,16 @@ function overallQuizScore(scores: Array<number | null>) {
   const completed = scores.filter((score): score is number => typeof score === 'number');
   if (!completed.length) return null;
   return Math.round(completed.reduce((sum, score) => sum + score, 0) / completed.length);
+}
+
+function mergeCompletedProjectIds(current: string[], incoming: string[]) {
+  return Array.from(new Set([...current, ...incoming].map(text).filter(Boolean)));
+}
+
+function sameStringSet(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((item) => rightSet.has(item));
 }
 
 function Quiz({ profile, metrics, setMetrics }: CommonProps) {

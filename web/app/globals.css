@@ -1171,6 +1171,51 @@ textarea.input {
     color-mix(in srgb, var(--success-tint) 42%, var(--surface));
 }
 
+.project-activity-section {
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.project-activity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.project-activity-card {
+  width: 100%;
+  min-height: 118px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  display: grid;
+  gap: 12px;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 96% 12%, color-mix(in srgb, var(--primary) 12%, transparent), transparent 7rem),
+    color-mix(in srgb, var(--surface) 62%, transparent);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.project-activity-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+  background:
+    radial-gradient(circle at 96% 12%, color-mix(in srgb, var(--primary) 18%, transparent), transparent 7rem),
+    color-mix(in srgb, var(--elevated) 78%, transparent);
+}
+
+.project-activity-preview {
+  margin-top: 6px;
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .skeleton-card {
   pointer-events: none;
 }

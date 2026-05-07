@@ -30,6 +30,7 @@ type Body =
       action: 'recommend';
       profile?: Record<string, unknown>;
       metrics?: Record<string, unknown>;
+      forceNew?: boolean;
     }
   | {
       action: 'chat';
@@ -242,28 +243,31 @@ Deno.serve(async (req) => {
     if (body.action === 'recommend') {
       const profile = body.profile ?? {};
       const metrics = body.metrics ?? {};
-      const { data: sessions, error: reuseError } = await supabase
-        .from('ai_project_recommendation_sessions')
-        .select('id, recommendations, chats, completed_project_ids, updated_at')
-        .eq('user_id', user.id)
-        .order('updated_at', { ascending: false })
-        .limit(1);
+      if (!body.forceNew) {
+        const { data: sessions, error: reuseError } = await supabase
+          .from('ai_project_recommendation_sessions')
+          .select('id, recommendations, chats, completed_project_ids, updated_at')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+          .limit(1);
 
-      if (reuseError) throw reuseError;
+        if (reuseError) throw reuseError;
 
-      const latest = Array.isArray(sessions) ? sessions[0] : null;
-      if (latest && Array.isArray(latest.recommendations) && latest.recommendations.length) {
-        const completed = completedIds(latest.completed_project_ids);
-        const recommendations = latest.recommendations.map(normalizeProject);
-        const allCompleted = recommendations.every((project) => completed.includes(project.id));
-        if (!allCompleted) {
-          return jsonResponse({
-            sessionId: latest.id,
-            recommendations,
-            chats: latest.chats ?? {},
-            completedProjectIds: completed,
-            reused: true,
-          });
+        const latest = Array.isArray(sessions) ? sessions[0] : null;
+        if (latest && Array.isArray(latest.recommendations) && latest.recommendations.length) {
+          const completed = completedIds(latest.completed_project_ids);
+          const recommendations = latest.recommendations.map(normalizeProject);
+          const completedInCurrentBatch = recommendations.filter((project) => completed.includes(project.id));
+          const currentBatchComplete = completedInCurrentBatch.length >= 3;
+          if (!currentBatchComplete) {
+            return jsonResponse({
+              sessionId: latest.id,
+              recommendations,
+              chats: latest.chats ?? {},
+              completedProjectIds: completed,
+              reused: true,
+            });
+          }
         }
       }
 
