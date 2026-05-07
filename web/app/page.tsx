@@ -115,6 +115,21 @@ type ProjectChatMessage = {
   id: string;
   role: 'assistant' | 'user';
   content: string;
+  createdAt?: string;
+};
+
+type ProjectCoachRecommendResponse = {
+  sessionId?: string;
+  recommendations?: ProjectRecommendation[];
+  chats?: Record<string, ProjectChatMessage[]>;
+  error?: string;
+};
+
+type ProjectCoachChatResponse = {
+  answer?: string;
+  messages?: ProjectChatMessage[];
+  chats?: Record<string, ProjectChatMessage[]>;
+  error?: string;
 };
 
 type InterviewHistoryItem = {
@@ -1369,7 +1384,12 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
     MOTIVATIONAL_QUOTES.indexOf(motivation)
   );
   const activeMotivation = MOTIVATIONAL_QUOTES[Math.max(0, motivationIndex)] ?? motivation;
-  const projectRecommendations = useMemo(() => generateProjectRecommendations(profile, metrics), [profile, metrics]);
+  const fallbackProjectRecommendations = useMemo(() => generateProjectRecommendations(profile, metrics), [profile, metrics]);
+  const [projectRecommendations, setProjectRecommendations] = useState<ProjectRecommendation[]>(fallbackProjectRecommendations);
+  const [projectSessionId, setProjectSessionId] = useState<string | null>(null);
+  const [projectChats, setProjectChats] = useState<Record<string, ProjectChatMessage[]>>({});
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectChatLoading, setProjectChatLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState<ProjectRecommendation | null>(null);
   const [projectMessages, setProjectMessages] = useState<ProjectChatMessage[]>([]);
   const [projectQuestion, setProjectQuestion] = useState('');
@@ -1380,27 +1400,104 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    setProjectRecommendations(fallbackProjectRecommendations);
+    setProjectSessionId(null);
+    setProjectChats({});
+
+    if (!hasSupabase || !supabase || !user) return () => {
+      active = false;
+    };
+
+    setProjectsLoading(true);
+    supabase.functions
+      .invoke<ProjectCoachRecommendResponse>('project-coach', {
+        body: {
+          action: 'recommend',
+          profile: buildUserProfile(profile),
+          metrics: buildProjectMetricsSnapshot(metrics),
+        },
+      })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error || data?.error) {
+          console.warn('AI project recommendations failed; using local fallback.', error ?? data?.error);
+          return;
+        }
+        if (data?.sessionId) setProjectSessionId(data.sessionId);
+        if (Array.isArray(data?.recommendations) && data.recommendations.length) {
+          setProjectRecommendations(data.recommendations);
+        }
+        if (data?.chats && typeof data.chats === 'object') {
+          setProjectChats(data.chats);
+        }
+      })
+      .catch((error) => {
+        if (active) console.warn('AI project recommendations failed; using local fallback.', error);
+      })
+      .finally(() => {
+        if (active) setProjectsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [fallbackProjectRecommendations, metrics, profile, user]);
+
   function openProject(project: ProjectRecommendation) {
+    const savedMessages = projectChats[project.id];
     setSelectedProject(project);
     setProjectQuestion('');
-    setProjectMessages([
-      {
-        id: id(),
-        role: 'assistant',
-        content: initialProjectMessage(project, profile),
-      },
-    ]);
+    setProjectMessages(savedMessages?.length
+      ? savedMessages
+      : [
+          {
+            id: id(),
+            role: 'assistant',
+            content: initialProjectMessage(project, profile),
+            createdAt: new Date().toISOString(),
+          },
+        ]);
   }
 
-  function askProjectQuestion() {
+  async function askProjectQuestion() {
     if (!selectedProject || !projectQuestion.trim()) return;
     const question = projectQuestion.trim();
-    setProjectMessages((current) => [
-      ...current,
-      { id: id(), role: 'user', content: question },
-      { id: id(), role: 'assistant', content: buildProjectAnswer(selectedProject, profile, question) },
-    ]);
+    const userMessage: ProjectChatMessage = { id: id(), role: 'user', content: question, createdAt: new Date().toISOString() };
+    setProjectMessages((current) => [...current, userMessage]);
     setProjectQuestion('');
+
+    if (hasSupabase && supabase && projectSessionId) {
+      setProjectChatLoading(true);
+      const { data, error } = await supabase.functions.invoke<ProjectCoachChatResponse>('project-coach', {
+        body: {
+          action: 'chat',
+          sessionId: projectSessionId,
+          projectId: selectedProject.id,
+          question,
+        },
+      });
+      setProjectChatLoading(false);
+
+      if (!error && !data?.error && Array.isArray(data?.messages)) {
+        setProjectMessages(data.messages);
+        setProjectChats((current) => ({ ...current, [selectedProject.id]: data.messages! }));
+        return;
+      }
+
+      console.warn('AI project chat failed; using local fallback.', error ?? data?.error);
+    }
+
+    const fallbackMessage: ProjectChatMessage = {
+      id: id(),
+      role: 'assistant',
+      content: buildProjectAnswer(selectedProject, profile, question),
+      createdAt: new Date().toISOString(),
+    };
+    const nextMessages = [...projectMessages, userMessage, fallbackMessage];
+    setProjectMessages(nextMessages);
+    setProjectChats((chats) => ({ ...chats, [selectedProject.id]: nextMessages }));
   }
 
   const recommended = [
@@ -1512,7 +1609,9 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
                 <span className="hero-kicker">Recommended Projects</span>
                 <h2 className="title" style={{ marginTop: 10 }}>Build proof for your profile</h2>
               </div>
-              <p className="body muted">Personalized from your role, CV score, and skills.</p>
+              <p className="body muted">
+                {projectsLoading ? 'AI is generating fresh project ideas...' : 'Personalized from your role, CV score, and skills.'}
+              </p>
             </div>
             <div className="project-card-grid">
               {projectRecommendations.map((project) => (
@@ -1602,6 +1701,7 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
         question={projectQuestion}
         setQuestion={setProjectQuestion}
         onAsk={askProjectQuestion}
+          chatLoading={projectChatLoading}
         onClose={() => setSelectedProject(null)}
       />
     ) : null}
@@ -1616,6 +1716,7 @@ function ProjectDetailModal({
   question,
   setQuestion,
   onAsk,
+  chatLoading,
   onClose,
 }: {
   project: ProjectRecommendation;
@@ -1624,6 +1725,7 @@ function ProjectDetailModal({
   question: string;
   setQuestion: (value: string) => void;
   onAsk: () => void;
+  chatLoading: boolean;
   onClose: () => void;
 }) {
   const role = profile.professionLabel || profile.professionalProfile.currentDesignation || 'your target role';
@@ -1661,9 +1763,15 @@ function ProjectDetailModal({
               {messages.map((message) => (
                 <div className={`project-chat-message ${message.role}`} key={message.id}>
                   <span className="message-label">{message.role === 'assistant' ? 'AiCoche' : 'You'}</span>
-                  <p className="body">{message.content}</p>
+                  <ProjectChatContent content={message.content} />
                 </div>
               ))}
+              {chatLoading ? (
+                <div className="project-chat-message assistant">
+                  <span className="message-label">AiCoche</span>
+                  <p className="body">Thinking through your profile and this project...</p>
+                </div>
+              ) : null}
             </div>
             <div className="project-chat-input">
               <textarea
@@ -1678,7 +1786,7 @@ function ProjectDetailModal({
                 }}
                 placeholder="Ask: How should I build this?"
               />
-              <Button onClick={onAsk} disabled={!question.trim()}>Ask</Button>
+              <Button onClick={onAsk} disabled={!question.trim() || chatLoading}>{chatLoading ? 'Wait...' : 'Ask'}</Button>
             </div>
           </aside>
         </div>
@@ -1697,6 +1805,45 @@ function ProjectBullets({ title, items }: { title: string; items: string[] }) {
         ))}
       </div>
     </section>
+  );
+}
+
+function ProjectChatContent({ content }: { content: string }) {
+  const normalized = content
+    .replace(/\*\*/g, '')
+    .replace(/\s+(\d+\.\s+)/g, '\n$1')
+    .replace(/\s+-\s+/g, '\n- ')
+    .trim();
+  const lines = normalized.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+
+  if (lines.length <= 1) {
+    return <p className="body">{normalized}</p>;
+  }
+
+  return (
+    <div className="project-chat-structured">
+      {lines.map((line, index) => {
+        const numbered = line.match(/^(\d+)\.\s*(.+)$/);
+        const bullet = line.match(/^[-•]\s*(.+)$/);
+        if (numbered) {
+          return (
+            <div className="project-chat-step" key={`${line}-${index}`}>
+              <span>{numbered[1]}</span>
+              <p className="body">{numbered[2]}</p>
+            </div>
+          );
+        }
+        if (bullet) {
+          return (
+            <div className="project-chat-step" key={`${line}-${index}`}>
+              <span>•</span>
+              <p className="body">{bullet[1]}</p>
+            </div>
+          );
+        }
+        return <p className="body" key={`${line}-${index}`}>{line}</p>;
+      })}
+    </div>
   );
 }
 
@@ -2731,6 +2878,26 @@ function buildUserProfile(profile: ProfileState) {
         items: section.items.slice(0, 4),
       })),
     },
+  };
+}
+
+function buildProjectMetricsSnapshot(metrics: MetricsState) {
+  return {
+    lastCvScore: metrics.lastCvScore,
+    lastInterviewScore: metrics.lastInterviewScore,
+    lastQuizScore: metrics.lastQuizScore,
+    lastQuizLevel: metrics.lastQuizLevel,
+    lastCvStatus: metrics.lastCvStatus,
+    lastCvFileName: metrics.lastCvFileName,
+    lastAnalysis: metrics.lastAnalysis
+      ? {
+          strengths: metrics.lastAnalysis.strengths.slice(0, 8),
+          weaknesses: metrics.lastAnalysis.weaknesses.slice(0, 8),
+          missingSkills: metrics.lastAnalysis.missingSkills.slice(0, 10),
+          suggestions: metrics.lastAnalysis.suggestions.slice(0, 8),
+          overallScore: metrics.lastAnalysis.overallScore,
+        }
+      : null,
   };
 }
 
