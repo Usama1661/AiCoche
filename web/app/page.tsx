@@ -144,10 +144,21 @@ type InterviewHistoryItem = {
 };
 
 type QuizQuestion = {
+  id?: string;
   question: string;
   options: string[];
   correctIndex: number;
+  answerIndex?: number;
   explanation: string;
+  type?: 'field' | 'cv' | 'scenario';
+};
+
+type GenerateQuizResponse = {
+  quizSessionId?: string;
+  topic?: string;
+  difficulty?: string;
+  questions?: QuizQuestion[];
+  error?: string;
 };
 
 type RemoteProfileRow = {
@@ -1385,7 +1396,7 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
   );
   const activeMotivation = MOTIVATIONAL_QUOTES[Math.max(0, motivationIndex)] ?? motivation;
   const fallbackProjectRecommendations = useMemo(() => generateProjectRecommendations(profile, metrics), [profile, metrics]);
-  const [projectRecommendations, setProjectRecommendations] = useState<ProjectRecommendation[]>(fallbackProjectRecommendations);
+  const [projectRecommendations, setProjectRecommendations] = useState<ProjectRecommendation[]>([]);
   const [projectSessionId, setProjectSessionId] = useState<string | null>(null);
   const [projectChats, setProjectChats] = useState<Record<string, ProjectChatMessage[]>>({});
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -1402,15 +1413,22 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
 
   useEffect(() => {
     let active = true;
-    setProjectRecommendations(fallbackProjectRecommendations);
+    setProjectRecommendations([]);
     setProjectSessionId(null);
     setProjectChats({});
 
-    if (!hasSupabase || !supabase || !user) return () => {
-      active = false;
-    };
-
     setProjectsLoading(true);
+    if (!hasSupabase || !supabase || !user) {
+      window.setTimeout(() => {
+        if (!active) return;
+        setProjectRecommendations(fallbackProjectRecommendations);
+        setProjectsLoading(false);
+      }, 450);
+      return () => {
+        active = false;
+      };
+    }
+
     supabase.functions
       .invoke<ProjectCoachRecommendResponse>('project-coach', {
         body: {
@@ -1423,6 +1441,7 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
         if (!active) return;
         if (error || data?.error) {
           console.warn('AI project recommendations failed; using local fallback.', error ?? data?.error);
+          setProjectRecommendations(fallbackProjectRecommendations);
           return;
         }
         if (data?.sessionId) setProjectSessionId(data.sessionId);
@@ -1434,7 +1453,10 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
         }
       })
       .catch((error) => {
-        if (active) console.warn('AI project recommendations failed; using local fallback.', error);
+        if (active) {
+          console.warn('AI project recommendations failed; using local fallback.', error);
+          setProjectRecommendations(fallbackProjectRecommendations);
+        }
       })
       .finally(() => {
         if (active) setProjectsLoading(false);
@@ -1614,7 +1636,19 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
               </p>
             </div>
             <div className="project-card-grid">
-              {projectRecommendations.map((project) => (
+              {projectsLoading ? Array.from({ length: 3 }).map((_, index) => (
+                <div className="project-card skeleton-card" key={`project-skeleton-${index}`}>
+                  <span className="skeleton-line short" />
+                  <span className="skeleton-line title" />
+                  <span className="skeleton-line" />
+                  <span className="skeleton-line" />
+                  <div className="project-skill-row">
+                    <span className="skeleton-pill" />
+                    <span className="skeleton-pill" />
+                    <span className="skeleton-pill" />
+                  </div>
+                </div>
+              )) : projectRecommendations.map((project) => (
                 <button className="project-card" key={project.id} onClick={() => openProject(project)} type="button">
                   <div className="row between">
                     <span className="mini-pill">{project.difficulty}</span>
@@ -1946,15 +1980,115 @@ function InterviewTab({ profile, usage, setUsage, reminders, setReminders, inter
   );
 }
 
+const FREE_QUIZ_LIMIT = 3;
+
+function normalizeQuizQuestions(value: unknown, fallback: QuizQuestion[]): QuizQuestion[] {
+  if (!Array.isArray(value)) return fallback;
+  const questions = value
+    .map((item, index) => {
+      const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+      const options = Array.isArray(record.options) ? record.options.map(text).filter(Boolean).slice(0, 4) : [];
+      const rawAnswer = typeof record.answerIndex === 'number'
+        ? record.answerIndex
+        : typeof record.correctIndex === 'number'
+          ? record.correctIndex
+          : 0;
+      const correctIndex = Math.min(Math.max(Math.round(rawAnswer), 0), Math.max(options.length - 1, 0));
+      const typeValue = text(record.type);
+      return {
+        id: text(record.id) || `quiz-question-${index + 1}`,
+        question: text(record.question),
+        options,
+        correctIndex,
+        explanation: text(record.explanation) || 'Review the correct answer and compare it with your selection.',
+        type: typeValue === 'field' || typeValue === 'cv' || typeValue === 'scenario' ? typeValue : undefined,
+      } satisfies QuizQuestion;
+    })
+    .filter((question) => question.question && question.options.length >= 2);
+  return questions.length ? questions : fallback;
+}
+
 function Quiz({ profile, metrics, setMetrics }: CommonProps) {
-  const questions = useMemo(() => buildQuiz(profile), [profile]);
+  const fallbackQuestions = useMemo(() => buildQuiz(profile, 0), [profile]);
+  const [questions, setQuestions] = useState<QuizQuestion[]>(fallbackQuestions);
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [quizSessionId, setQuizSessionId] = useState<string | null>(null);
+  const [loadingQuiz, setLoadingQuiz] = useState(false);
+  const [quizNotice, setQuizNotice] = useState('');
+  const [quizRefreshKey, setQuizRefreshKey] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [answers, setAnswers] = useState<number[]>([]);
-  const [result, setResult] = useState<{ score: number; level: string } | null>(null);
+  const [result, setResult] = useState<{ score: number; level: string; correct: number } | null>(null);
   const current = questions[currentIndex];
 
-  function submit() {
+  useEffect(() => {
+    let active = true;
+    const fallback = buildQuiz(profile, quizIndex);
+    setLoadingQuiz(true);
+    setQuestions([]);
+    setQuizSessionId(null);
+    setCurrentIndex(0);
+    setSelectedIndex(null);
+    setAnswers([]);
+    setResult(null);
+    setQuizNotice('');
+
+    if (!hasSupabase || !supabase) {
+      window.setTimeout(() => {
+        if (!active) return;
+        setQuestions(fallback);
+        setQuizNotice('AI quiz is not connected yet. Using a temporary fallback quiz.');
+        setLoadingQuiz(false);
+      }, 450);
+      return () => {
+        active = false;
+      };
+    }
+
+    const skillPool = compactSkills([
+      ...profile.skills,
+      ...profile.tools,
+      ...profile.professionalProfile.technicalSkills,
+      ...(metrics.lastAnalysis?.missingSkills ?? []),
+    ]).slice(0, 12);
+
+    supabase.functions.invoke<GenerateQuizResponse>('generate-quiz', {
+      body: {
+        topic: profile.professionLabel || profile.professionalProfile.currentDesignation || 'career readiness',
+        difficulty: profile.experience ?? 'intermediate',
+        skills: skillPool,
+        count: 6,
+        quizNumber: quizIndex + 1,
+        profile: buildUserProfile(profile),
+        metrics: buildProjectMetricsSnapshot(metrics),
+      },
+    }).then(({ data, error }) => {
+      if (!active) return;
+      if (error || data?.error) {
+        console.warn('AI quiz generation failed; using local fallback.', error ?? data?.error);
+        setQuestions(fallback);
+        setQuizNotice('AI quiz is unavailable right now. Deploy or retry the generate-quiz function to load fresh AI questions.');
+        return;
+      }
+      setQuizSessionId(data?.quizSessionId ?? null);
+      setQuestions(normalizeQuizQuestions(data?.questions, fallback));
+      setQuizNotice('');
+    }).catch((error) => {
+      if (!active) return;
+      console.warn('AI quiz generation failed; using local fallback.', error);
+      setQuestions(fallback);
+      setQuizNotice('AI quiz is unavailable right now. Deploy or retry the generate-quiz function to load fresh AI questions.');
+    }).finally(() => {
+      if (active) setLoadingQuiz(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [profile, quizIndex, quizRefreshKey]);
+
+  async function submit() {
     if (selectedIndex == null) return;
     const nextAnswers = [...answers, selectedIndex];
     if (currentIndex + 1 < questions.length) {
@@ -1967,8 +2101,33 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
     const score = Math.round((correct / questions.length) * 100);
     const level = quizLevel(score);
     setAnswers(nextAnswers);
-    setResult({ score, level });
+    setResult({ score, level, correct });
     setMetrics((m) => ({ ...m, lastQuizScore: score, lastQuizLevel: level }));
+
+    if (hasSupabase && supabase && quizSessionId) {
+      const payload = nextAnswers.map((answer, index) => ({
+        questionId: questions[index].id ?? `quiz-question-${index + 1}`,
+        selectedIndex: answer,
+      }));
+      const { error } = await supabase.functions.invoke('save-quiz-result', {
+        body: { quizSessionId, answers: payload },
+      });
+      if (error) {
+        console.warn('Could not save quiz result.', error);
+      }
+    }
+  }
+
+  function retakeQuiz() {
+    setCurrentIndex(0);
+    setSelectedIndex(null);
+    setAnswers([]);
+    setResult(null);
+  }
+
+  function nextQuiz() {
+    if (quizIndex + 1 >= FREE_QUIZ_LIMIT) return;
+    setQuizIndex((index) => index + 1);
   }
 
   if (result) {
@@ -1976,22 +2135,46 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
       <section className="screen stack">
         <div>
           <h1 className="display">AI Quiz</h1>
-          <p className="body muted">Your personalized skill level is ready.</p>
+          <p className="body muted">Quiz {quizIndex + 1} of {FREE_QUIZ_LIMIT} is complete. Review what was right and wrong.</p>
         </div>
         <div className="card stack" style={{ textAlign: 'center' }}>
           <div className="icon-box" style={{ margin: '0 auto', background: 'var(--primary)', color: 'white' }}>🏆</div>
           <h2 className="display" style={{ color: 'var(--gold)' }}>{result.score}%</h2>
           <p className="title">{result.level} Level</p>
-          <p className="body muted">This score is now shown on your dashboard.</p>
+          <p className="body muted">{result.correct} of {questions.length} correct. This score is now shown on your dashboard.</p>
         </div>
-        <h2 className="title">AI Feedback</h2>
+        <div className="row between">
+          <h2 className="title">Answer Review</h2>
+          <span className="chip">Quiz {quizIndex + 1} / {FREE_QUIZ_LIMIT}</span>
+        </div>
         {questions.map((q, index) => (
-          <div className="card" key={q.question}>
-            <h3 className="subtitle">Question {index + 1}</h3>
+          <div className="card stack quiz-review-card" key={q.question}>
+            <div className="row between">
+              <h3 className="subtitle">Question {index + 1}</h3>
+              <span className={`mini-pill ${answers[index] === q.correctIndex ? 'success' : 'error'}`}>
+                {answers[index] === q.correctIndex ? 'Correct' : 'Wrong'}
+              </span>
+            </div>
+            <p className="body">{q.question}</p>
+            <div className="grid">
+              <div className={`quiz-answer-box ${answers[index] === q.correctIndex ? '' : 'wrong'}`}>
+                <span className="label">Your answer</span>
+                <p className="body">{q.options[answers[index]] ?? 'No answer'}</p>
+              </div>
+              <div className="quiz-answer-box correct">
+                <span className="label">Correct answer</span>
+                <p className="body">{q.options[q.correctIndex]}</p>
+              </div>
+            </div>
             <p className="body muted">{q.explanation}</p>
           </div>
         ))}
-        <Button onClick={() => { setCurrentIndex(0); setSelectedIndex(null); setAnswers([]); setResult(null); }}>Retake AI Quiz</Button>
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          <Button onClick={retakeQuiz}>Retake Quiz {quizIndex + 1}</Button>
+          <Button variant="secondary" onClick={nextQuiz} disabled={quizIndex + 1 >= FREE_QUIZ_LIMIT}>
+            {quizIndex + 1 >= FREE_QUIZ_LIMIT ? 'All Free Quizzes Done' : `Next Quiz (${quizIndex + 2}/${FREE_QUIZ_LIMIT})`}
+          </Button>
+        </div>
       </section>
     );
   }
@@ -2000,22 +2183,48 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
     <section className="screen stack">
       <div>
         <h1 className="display">AI Quiz</h1>
-        <p className="body muted">Personalized for your profile and background.</p>
+        <p className="body muted">Quiz {quizIndex + 1} of {FREE_QUIZ_LIMIT}. AI mixes field questions with CV/profile questions.</p>
       </div>
       <div className="grid">
         <div className="card"><p className="caption muted">Profile</p><h2 className="subtitle">{profile.professionLabel || 'Profession not set'}</h2></div>
         <div className="card"><p className="caption muted">Last Level</p><h2 className="subtitle">{metrics.lastQuizScore != null ? `${metrics.lastQuizLevel} ${metrics.lastQuizScore}%` : 'Not taken'}</h2></div>
       </div>
+      {quizNotice ? (
+        <div className="card row between quiz-notice">
+          <p className="body muted">{quizNotice}</p>
+          <Button variant="secondary" onClick={() => setQuizRefreshKey((key) => key + 1)} disabled={loadingQuiz}>
+            {loadingQuiz ? 'Retrying...' : 'Retry AI'}
+          </Button>
+        </div>
+      ) : null}
+      {loadingQuiz || !current ? (
+        <div className="card stack quiz-skeleton-card">
+          <div className="row between">
+            <span className="skeleton-pill" />
+            <span className="skeleton-line short" />
+          </div>
+          <span className="skeleton-line title" />
+          <span className="skeleton-line" />
+          <span className="skeleton-line" />
+          <span className="skeleton-line" />
+          <span className="skeleton-line" />
+          <span className="skeleton-line button-wide" />
+        </div>
+      ) : (
       <div className="card stack">
-        <div className="row between"><span className="chip">AI Question</span><span className="caption muted">{currentIndex + 1} / {questions.length}</span></div>
+        <div className="row between">
+          <span className="chip">{loadingQuiz ? 'Generating AI Quiz...' : qTypeLabel(current.type)}</span>
+          <span className="caption muted">{currentIndex + 1} / {questions.length}</span>
+        </div>
         <h2 className="title">{current.question}</h2>
         {current.options.map((option, index) => (
           <Choice key={option} selected={selectedIndex === index} onClick={() => setSelectedIndex(index)}>
             <span className="body" style={{ fontWeight: 800 }}>{option}</span>
           </Choice>
         ))}
-        <Button onClick={submit} disabled={selectedIndex == null}>{currentIndex === questions.length - 1 ? 'Finish Quiz' : 'Next Question'}</Button>
+        <Button onClick={submit} disabled={selectedIndex == null || loadingQuiz}>{currentIndex === questions.length - 1 ? 'Finish Quiz' : 'Next Question'}</Button>
       </div>
+      )}
     </section>
   );
 }
@@ -2741,49 +2950,164 @@ function InfoPage({ title, setView }: { title: string; setView: (view: View) => 
   );
 }
 
-function buildQuiz(profile: ProfileState): QuizQuestion[] {
+function buildQuiz(profile: ProfileState, quizIndex = 0): QuizQuestion[] {
   const profession = profile.professionLabel || 'Professional';
   const skill = profile.skills[0] ?? 'problem solving';
   const tool = profile.tools[0] ?? 'your main tool';
   const project = profile.projects[0] ?? 'a recent project';
-  return [
+  const quizzes: QuizQuestion[][] = [
+  [
     {
+      id: `fallback-${quizIndex}-1`,
       question: `As a ${profession}, what should you highlight first in your profile?`,
       options: ['Only tools installed', 'Relevant skills backed by outcomes', 'A long story without results', 'Every task ever done'],
       correctIndex: 1,
       explanation: 'Strong profiles connect skills to outcomes so recruiters can see evidence quickly.',
+      type: 'cv',
     },
     {
+      id: `fallback-${quizIndex}-2`,
       question: 'What is the best way to answer a technical quiz question?',
       options: ['Guess quickly', 'Explain reasoning, trade-offs, and final choice', 'Avoid unknowns', 'Always give the shortest answer'],
       correctIndex: 1,
       explanation: 'AI can score reasoning better when you explain the path, not just the final answer.',
+      type: 'field',
     },
     {
+      id: `fallback-${quizIndex}-3`,
       question: `You listed "${skill}" as a skill. What proves it best?`,
       options: ['Saying you are passionate', 'Repeating the skill', 'A project, metric, or example', 'Adding it only to your headline'],
       correctIndex: 2,
       explanation: 'Evidence from real work makes a skill credible.',
+      type: 'cv',
     },
     {
+      id: `fallback-${quizIndex}-4`,
       question: `When discussing "${tool}", what answer sounds strongest?`,
       options: ['How the tool helped complete real work', 'That you opened it once', 'That everyone uses it', 'A memorized definition only'],
       correctIndex: 0,
       explanation: 'Hiring and learning assessments reward practical use over name-dropping.',
+      type: 'scenario',
     },
     {
+      id: `fallback-${quizIndex}-5`,
       question: `If asked about ${project}, which structure is clearest?`,
       options: ['Problem, action, result, learning', 'Only the project name', 'Technical details with no outcome', 'What your teammate did'],
       correctIndex: 0,
       explanation: 'A problem-action-result structure shows ownership and impact.',
+      type: 'cv',
     },
     {
+      id: `fallback-${quizIndex}-6`,
       question: `Your preferred language is ${profile.language}. How should quiz feedback be used?`,
       options: ['Ignore it if score is good', 'Review weak areas and practice them', 'Retake without learning', 'Change profile randomly'],
       correctIndex: 1,
       explanation: 'The score is useful when it turns into targeted practice.',
+      type: 'scenario',
     },
+  ],
+  [
+    {
+      id: `fallback-${quizIndex}-1`,
+      question: `For ${profession} growth, what matters most after learning a new concept?`,
+      options: ['Saving notes only', 'Applying it in a small project', 'Waiting for perfect confidence', 'Avoiding feedback'],
+      correctIndex: 1,
+      explanation: 'Applying a concept in a project turns knowledge into portfolio proof.',
+      type: 'field',
+    },
+    {
+      id: `fallback-${quizIndex}-2`,
+      question: 'What makes a CV bullet stronger?',
+      options: ['Action plus measurable outcome', 'Long paragraph', 'Tool list only', 'Generic responsibility'],
+      correctIndex: 0,
+      explanation: 'Action plus outcome helps recruiters understand impact quickly.',
+      type: 'cv',
+    },
+    {
+      id: `fallback-${quizIndex}-3`,
+      question: `If "${skill}" is weak, what is the best improvement plan?`,
+      options: ['Hide it forever', 'Build one focused project and explain decisions', 'Add it everywhere', 'Only watch tutorials'],
+      correctIndex: 1,
+      explanation: 'A focused project creates evidence and interview stories.',
+      type: 'cv',
+    },
+    {
+      id: `fallback-${quizIndex}-4`,
+      question: `What should a ${profession} portfolio project include?`,
+      options: ['Problem, features, stack, screenshots, and learning', 'Only source code', 'Only a title', 'No README'],
+      correctIndex: 0,
+      explanation: 'A portfolio project needs context so employers understand your work.',
+      type: 'field',
+    },
+    {
+      id: `fallback-${quizIndex}-5`,
+      question: 'What is the best way to handle a question you do not know?',
+      options: ['Invent an answer', 'Explain what you know and how you would find out', 'Say nothing', 'Change the topic'],
+      correctIndex: 1,
+      explanation: 'Reasoning and learning approach matter when knowledge is incomplete.',
+      type: 'scenario',
+    },
+    {
+      id: `fallback-${quizIndex}-6`,
+      question: 'Which skill gap should you prioritize first?',
+      options: ['The one most connected to your target role', 'The trendiest one online', 'The easiest name to add', 'The one unrelated to your goal'],
+      correctIndex: 0,
+      explanation: 'Target-role alignment keeps your learning focused and useful.',
+      type: 'cv',
+    },
+  ],
+  [
+    {
+      id: `fallback-${quizIndex}-1`,
+      question: `How should a ${profession} explain project impact?`,
+      options: ['Mention users, performance, quality, or business result', 'Only mention colors', 'Avoid numbers always', 'Say it was hard'],
+      correctIndex: 0,
+      explanation: 'Impact connects your work to outcomes, which makes your profile stronger.',
+      type: 'field',
+    },
+    {
+      id: `fallback-${quizIndex}-2`,
+      question: 'What should you do after a low quiz score?',
+      options: ['Review wrong answers and practice weak areas', 'Ignore it', 'Retake immediately without study', 'Delete profile data'],
+      correctIndex: 0,
+      explanation: 'Wrong answers show exactly what to practice next.',
+      type: 'scenario',
+    },
+    {
+      id: `fallback-${quizIndex}-3`,
+      question: `What proves "${tool}" experience best?`,
+      options: ['A deployed feature or project using it', 'A logo in the skills section', 'A copied definition', 'A vague claim'],
+      correctIndex: 0,
+      explanation: 'Real usage proves tool knowledge better than listing names.',
+      type: 'cv',
+    },
+    {
+      id: `fallback-${quizIndex}-4`,
+      question: 'What makes learning future-ready?',
+      options: ['Combining fundamentals, projects, and feedback', 'Only memorizing questions', 'Avoiding real work', 'Skipping review'],
+      correctIndex: 0,
+      explanation: 'Future growth comes from fundamentals plus practical proof.',
+      type: 'field',
+    },
+    {
+      id: `fallback-${quizIndex}-5`,
+      question: 'Which README section helps recruiters most?',
+      options: ['Problem, demo, setup, features, and decisions', 'Blank README', 'Only install command', 'Only your name'],
+      correctIndex: 0,
+      explanation: 'A structured README helps recruiters evaluate your project quickly.',
+      type: 'scenario',
+    },
+    {
+      id: `fallback-${quizIndex}-6`,
+      question: `How should ${profession} interview prep connect to your CV?`,
+      options: ['Prepare stories around skills and projects already listed', 'Memorize unrelated answers', 'Avoid your projects', 'Only talk about salary'],
+      correctIndex: 0,
+      explanation: 'Your CV should guide interview stories, examples, and evidence.',
+      type: 'cv',
+    },
+  ],
   ];
+  return quizzes[quizIndex % quizzes.length];
 }
 
 function quizLevel(score: number) {
@@ -2792,6 +3116,13 @@ function quizLevel(score: number) {
   if (score >= 60) return 'Skilled';
   if (score >= 40) return 'Growing';
   return 'Starter';
+}
+
+function qTypeLabel(type: QuizQuestion['type']) {
+  if (type === 'cv') return 'CV/Profile Question';
+  if (type === 'field') return 'Field Question';
+  if (type === 'scenario') return 'Scenario Question';
+  return 'AI Question';
 }
 
 function mockStart(profile: ProfileState) {

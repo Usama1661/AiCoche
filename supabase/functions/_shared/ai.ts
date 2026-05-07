@@ -618,25 +618,45 @@ export async function generateQuizWithAi({
   difficulty,
   skills,
   count,
+  profile,
+  metrics,
+  quizNumber,
 }: {
   topic: string;
   difficulty: string;
   skills: string[];
   count: number;
+  profile?: Record<string, unknown>;
+  metrics?: Record<string, unknown>;
+  quizNumber?: number;
 }) {
   const raw = await chatCompletionJson(
     [
       {
         role: 'system',
         content: `Create career skill quiz questions. Return ONLY JSON:
-{"questions":[{"id": string, "question": string, "options": string[], "answerIndex": number, "explanation": string}]}`,
+{"questions":[{"id": string, "question": string, "options": string[], "answerIndex": number, "explanation": string, "type": "field" | "cv" | "scenario"}]}
+Rules:
+- Create a mix of general field questions and CV/profile-specific questions.
+- At least 2 questions must be about the user's target field and future growth.
+- At least 2 questions must use the user's CV/profile, skills, missing skills, projects, or role history.
+- Options must be clear, with exactly one correct answer.
+- Explanations must teach the user what they got wrong or right.
+- Avoid repeated questions across quiz numbers.`,
       },
       {
         role: 'user',
-        content: `Topic: ${topic}
+        content: `Quiz number: ${quizNumber ?? 1}
+Topic: ${topic}
 Difficulty: ${difficulty}
 Relevant skills: ${skills.join(', ')}
-Question count: ${count}`,
+Question count: ${count}
+
+Profile:
+${JSON.stringify(profile ?? {}).slice(0, 14_000)}
+
+CV metrics and analysis:
+${JSON.stringify(metrics ?? {}).slice(0, 8_000)}`,
       },
     ],
     { temperature: 0.45 }

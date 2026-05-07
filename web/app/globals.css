@@ -1096,6 +1096,11 @@ textarea.input {
   background: var(--warning-tint);
 }
 
+.mini-pill.error {
+  color: var(--error);
+  background: var(--error-tint);
+}
+
 .dashboard-section-title {
   margin-top: 6px;
 }
@@ -1157,6 +1162,56 @@ textarea.input {
   background:
     radial-gradient(circle at 90% 8%, color-mix(in srgb, var(--primary) 20%, transparent), transparent 10rem),
     color-mix(in srgb, var(--elevated) 82%, transparent);
+}
+
+.skeleton-card {
+  pointer-events: none;
+}
+
+.skeleton-line,
+.skeleton-pill {
+  position: relative;
+  overflow: hidden;
+  display: block;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.skeleton-line::after,
+.skeleton-pill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 14%, transparent), transparent);
+  animation: skeletonShimmer 1.25s ease-in-out infinite;
+}
+
+.skeleton-line {
+  width: 100%;
+  height: 13px;
+}
+
+.skeleton-line.short {
+  width: 34%;
+}
+
+.skeleton-line.title {
+  width: 76%;
+  height: 22px;
+}
+
+.skeleton-line.button-wide {
+  height: 42px;
+}
+
+.skeleton-pill {
+  width: 72px;
+  height: 28px;
+}
+
+.quiz-skeleton-card {
+  min-height: 430px;
 }
 
 .project-skill-row,
@@ -1780,6 +1835,12 @@ textarea.input {
   }
   50% {
     box-shadow: 0 0 0 10px color-mix(in srgb, var(--primary) 9%, transparent);
+  }
+}
+
+@keyframes skeletonShimmer {
+  to {
+    transform: translateX(100%);
   }
 }
 
@@ -2413,6 +2474,38 @@ textarea.input.chat-textarea {
   transform: translateY(-3px);
   border-color: var(--glow);
   background: var(--elevated);
+}
+
+.quiz-review-card {
+  border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
+}
+
+.quiz-notice {
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--border));
+  background:
+    radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--warning) 12%, transparent), transparent 10rem),
+    var(--card);
+}
+
+.quiz-answer-box {
+  min-height: 92px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+
+.quiz-answer-box.correct {
+  border-color: color-mix(in srgb, var(--success) 34%, var(--border));
+  background: color-mix(in srgb, var(--success-tint) 50%, var(--surface));
+}
+
+.quiz-answer-box.wrong {
+  border-color: color-mix(in srgb, var(--error) 38%, var(--border));
+  background: color-mix(in srgb, var(--error-tint) 58%, var(--surface));
 }
 
 .chat-readonly-footer {
