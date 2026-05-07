@@ -22,6 +22,7 @@ type View =
 
 type Experience = 'beginner' | 'intermediate' | 'experienced';
 type Goal = 'job' | 'switch' | 'freelance' | 'skills';
+type Gender = 'male' | 'female';
 
 type ProfessionalProfile = {
   fullName: string;
@@ -50,6 +51,7 @@ type ProfileState = {
   avatarUrl: string;
   experience: Experience | null;
   goal: Goal | null;
+  gender: Gender | null;
   language: string;
   skills: string[];
   tools: string[];
@@ -62,6 +64,7 @@ type MetricsState = {
   lastInterviewScore: number | null;
   lastQuizScore: number | null;
   lastQuizLevel: string | null;
+  quizScores?: Array<number | null>;
   lastCvDocumentId: string | null;
   lastCvStatus: string | null;
   lastCvFileName: string | null;
@@ -122,6 +125,8 @@ type ProjectCoachRecommendResponse = {
   sessionId?: string;
   recommendations?: ProjectRecommendation[];
   chats?: Record<string, ProjectChatMessage[]>;
+  completedProjectIds?: string[];
+  reused?: boolean;
   error?: string;
 };
 
@@ -129,6 +134,11 @@ type ProjectCoachChatResponse = {
   answer?: string;
   messages?: ProjectChatMessage[];
   chats?: Record<string, ProjectChatMessage[]>;
+  error?: string;
+};
+
+type ProjectCoachCompleteResponse = {
+  completedProjectIds?: string[];
   error?: string;
 };
 
@@ -168,6 +178,7 @@ type RemoteProfileRow = {
   professionLabel?: unknown;
   experience?: unknown;
   goal?: unknown;
+  gender?: unknown;
   language?: unknown;
   skills?: unknown;
   tools?: unknown;
@@ -283,6 +294,7 @@ const initialProfile: ProfileState = {
   avatarUrl: '',
   experience: null,
   goal: null,
+  gender: null,
   language: 'English',
   skills: [],
   tools: [],
@@ -295,6 +307,7 @@ const initialMetrics: MetricsState = {
   lastInterviewScore: null,
   lastQuizScore: null,
   lastQuizLevel: null,
+  quizScores: [null, null, null],
   lastCvDocumentId: null,
   lastCvStatus: null,
   lastCvFileName: null,
@@ -461,6 +474,10 @@ function isExperience(value: unknown): value is Experience {
 
 function isGoal(value: unknown): value is Goal {
   return value === 'job' || value === 'switch' || value === 'freelance' || value === 'skills';
+}
+
+function isGender(value: unknown): value is Gender {
+  return value === 'male' || value === 'female';
 }
 
 function stringList(value: unknown): string[] {
@@ -656,6 +673,7 @@ function mergeRemoteProfile(remote: unknown, fallback: ProfileState): ProfileSta
     : bestHeadline || fallback.professionLabel;
   const remoteExperience = isExperience(data.experience) ? data.experience : fallback.experience;
   const remoteGoal = isGoal(data.goal) ? data.goal : fallback.goal;
+  const remoteGender = isGender(data.gender) ? data.gender : fallback.gender;
   const hasSavedOnboardingAnswers = typeof data.professionKey === 'string' && data.professionKey.trim() &&
     typeof data.professionLabel === 'string' && data.professionLabel.trim() &&
     isExperience(data.experience) &&
@@ -671,6 +689,7 @@ function mergeRemoteProfile(remote: unknown, fallback: ProfileState): ProfileSta
     professionLabel: remoteProfessionLabel,
     experience: remoteExperience,
     goal: remoteGoal,
+    gender: remoteGender,
     language: typeof data.language === 'string' && data.language.trim() ? data.language : fallback.language,
     skills: compactSkills([...technicalSkills, ...stringList(data.skills), ...fallback.skills]),
     tools: compactSkills([...toolSkills, ...stringList(data.tools), ...fallback.tools]),
@@ -896,6 +915,7 @@ export default function WebApp() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [interviewSessions, setInterviewSessions] = useState<InterviewHistoryItem[]>([]);
   const [selectedInterviewSessionId, setSelectedInterviewSessionId] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const remoteProfileLoadedFor = useRef<string | null>(null);
@@ -909,13 +929,28 @@ export default function WebApp() {
     setInterviewSessions(normalizeInterviewHistory(storageGet<unknown>('aicoche-web-interview-sessions', [])));
 
     supabase?.auth.getUser().then(({ data }) => {
-      setUser(data.user ?? null);
+      const authUser = data.user ?? null;
+      if (authUser) {
+        const savedProfile = storageGet<ProfileState>(
+          `aicoche-web-profile-${authUser.id}`,
+          storageGet<ProfileState>('aicoche-web-profile', initialProfile)
+        );
+        setProfile(normalizeProfileState(savedProfile));
+      }
+      setUser(authUser);
       setHydrated(true);
     }) ?? setHydrated(true);
   }, []);
 
   useEffect(() => storageSet('aicoche-web-theme', theme), [theme]);
-  useEffect(() => storageSet('aicoche-web-profile', profile), [profile]);
+  useEffect(() => {
+    if (!hydrated) return;
+    if (user) {
+      storageSet(`aicoche-web-profile-${user.id}`, profile);
+      return;
+    }
+    storageSet('aicoche-web-profile', profile);
+  }, [hydrated, profile, user]);
   useEffect(() => storageSet('aicoche-web-metrics', metrics), [metrics]);
   useEffect(() => storageSet('aicoche-web-usage', usage), [usage]);
   useEffect(() => storageSet('aicoche-web-reminders', reminders), [reminders]);
@@ -928,18 +963,23 @@ export default function WebApp() {
       setView(seenSplash ? 'login' : 'splash');
       return;
     }
+    if (profileLoading || (hasSupabase && remoteProfileLoadedFor.current !== user.id)) return;
     setView(profile.onboardingComplete ? 'home' : 'onboarding');
-  }, [hydrated, profile.onboardingComplete, user]);
+  }, [hydrated, profile.onboardingComplete, profileLoading, user]);
 
   useEffect(() => {
     if (!hydrated || !user || remoteProfileLoadedFor.current === user.id) return;
     remoteProfileLoadedFor.current = user.id;
+    setProfileLoading(true);
     fetchRemoteProfile(profile)
       .then((remote) => {
         if (remote) setProfile(remote);
       })
       .catch(() => {
         // Local profile state is still usable if remote profile loading fails.
+      })
+      .finally(() => {
+        setProfileLoading(false);
       });
     fetchRemoteInterviewSessions()
       .then((sessions) => {
@@ -1001,7 +1041,7 @@ export default function WebApp() {
       {view === 'splash' ? <Splash onDone={() => setView('login')} /> : null}
       {view === 'login' ? <Auth mode="login" {...common} /> : null}
       {view === 'signup' ? <Auth mode="signup" {...common} /> : null}
-      {view === 'onboarding' ? <Onboarding profile={profile} setProfile={setProfile} setView={setView} /> : null}
+      {view === 'onboarding' ? <Onboarding user={user} profile={profile} setProfile={setProfile} setView={setView} setError={setError} /> : null}
 
       {user && profile.onboardingComplete ? (
         <>
@@ -1171,7 +1211,7 @@ function Auth({ mode, setUser, setProfile, setView, setBusy, setError, busy }: C
   );
 }
 
-function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile' | 'setProfile' | 'setView'>) {
+function Onboarding({ user, profile, setProfile, setView, setError }: Pick<CommonProps, 'user' | 'profile' | 'setProfile' | 'setView' | 'setError'>) {
   const [step, setStep] = useState(0);
   const [query, setQuery] = useState('');
   const [customField, setCustomField] = useState('');
@@ -1182,6 +1222,7 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
   );
   const [experience, setExperience] = useState<Experience | null>(profile.experience);
   const [goal, setGoal] = useState<Goal | null>(profile.goal);
+  const [gender, setGender] = useState<Gender | null>(profile.gender);
   const [language, setLanguage] = useState(profile.language || 'English');
   const filtered = professions.filter((p) => p[1].toLowerCase().includes(query.toLowerCase()));
   const suggestions = filtered.slice(0, 6);
@@ -1189,7 +1230,8 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
   const showOther = query.trim().length > 0 && !exactMatch;
   const popularFields = ['Software Engineer', 'Frontend Developer', 'Data Analyst', 'UI/UX Designer', 'Product Manager', 'Digital Marketer'];
   const suggestedLanguages = ['English', 'Spanish', 'French'];
-  const canContinue = step === 0 ? profession : step === 1 ? experience : step === 2 ? goal : true;
+  const totalSteps = 5;
+  const canContinue = step === 0 ? profession : step === 1 ? experience : step === 2 ? goal : step === 3 ? gender : true;
 
   function chooseProfession(key: string, label: string) {
     setProfession({ key, label });
@@ -1215,19 +1257,34 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
 
   function next() {
     if (!canContinue) return;
-    if (step < 3) {
+    if (step < totalSteps - 1) {
       setStep((s) => s + 1);
       return;
     }
-    setProfile((current) => ({
-      ...current,
+    const nextProfile = {
+      ...profile,
       onboardingComplete: true,
       professionKey: profession!.key,
       professionLabel: profession!.label,
       experience: experience!,
       goal: goal!,
+      gender: gender!,
       language,
+      professionalProfile: {
+        ...profile.professionalProfile,
+        headline: profile.professionalProfile.headline || profession!.label,
+        currentDesignation: profile.professionalProfile.currentDesignation || profession!.label,
+        source: profile.professionalProfile.source ?? 'manual',
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    setProfile((current) => ({
+      ...current,
+      ...nextProfile,
     }));
+    void saveProfileSnapshot(nextProfile, user).catch((error) => {
+      setError(error instanceof Error ? error.message : 'Could not save onboarding profile.');
+    });
     setView('home');
   }
 
@@ -1240,14 +1297,14 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
             <span>AiCoche</span>
           </div>
           <span className="hero-kicker">Personalized setup</span>
-          <div className="progress"><span style={{ width: `${((step + 1) / 4) * 100}%` }} /></div>
-          <p className="body muted">Step {step + 1} of 4</p>
+          <div className="progress"><span style={{ width: `${((step + 1) / totalSteps) * 100}%` }} /></div>
+          <p className="body muted">Step {step + 1} of {totalSteps}</p>
           <div>
             <h1 className="display" style={{ fontSize: 'clamp(34px, 5vw, 54px)' }}>
-              {step === 0 ? "What's your profession?" : step === 1 ? 'Experience Level' : step === 2 ? 'Career Goal' : 'Preferred Language'}
+              {step === 0 ? "What's your profession?" : step === 1 ? 'Experience Level' : step === 2 ? 'Career Goal' : step === 3 ? 'Gender' : 'Preferred Language'}
             </h1>
             <p className="body muted" style={{ marginTop: 12 }}>
-              {step === 0 ? 'Search a field, pick a recommendation, or add your own.' : step === 1 ? 'How many years of experience do you have?' : step === 2 ? 'What are you aiming to achieve?' : 'Choose from suggested coaching languages.'}
+              {step === 0 ? 'Search a field, pick a recommendation, or add your own.' : step === 1 ? 'How many years of experience do you have?' : step === 2 ? 'What are you aiming to achieve?' : step === 3 ? 'This helps personalize profile guidance and coaching tone.' : 'Choose from suggested coaching languages.'}
             </p>
           </div>
           <div className="card stack">
@@ -1262,7 +1319,7 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
             </div>
             <div className="soft-stat">
               <span className="label">Setup</span>
-              <span className="soft-stat-value">4</span>
+              <span className="soft-stat-value">{totalSteps}</span>
               <span className="soft-stat-label">Steps to personalize AiCoche</span>
             </div>
           </div>
@@ -1363,6 +1420,19 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
         </div>
       ) : null}
       {step === 3 ? (
+        <div className="grid">
+          {[
+            ['male', 'Male', 'Personalize coaching with your selected gender.'],
+            ['female', 'Female', 'Personalize coaching with your selected gender.'],
+          ].map(([idValue, title, detail]) => (
+            <Choice key={idValue} selected={gender === idValue} onClick={() => setGender(idValue as Gender)} tall>
+              <span className="subtitle">{title}</span>
+              <span className="body muted">{detail}</span>
+            </Choice>
+          ))}
+        </div>
+      ) : null}
+      {step === 4 ? (
         <div className="stack">
           {suggestedLanguages.map((lang) => (
             <Choice key={lang} selected={language === lang} onClick={() => setLanguage(lang)}>
@@ -1374,7 +1444,7 @@ function Onboarding({ profile, setProfile, setView }: Pick<CommonProps, 'profile
       ) : null}
       <div className="row">
         <Button variant="secondary" onClick={() => (step === 0 ? setView('login') : setStep((s) => s - 1))}>Back</Button>
-        <Button onClick={next} disabled={!canContinue} style={{ flex: 1 }}>{step === 3 ? 'Get Started' : 'Continue'}</Button>
+        <Button onClick={next} disabled={!canContinue} style={{ flex: 1 }}>{step === totalSteps - 1 ? 'Get Started' : 'Continue'}</Button>
       </div>
         </div>
       </div>
@@ -1399,8 +1469,10 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
   const [projectRecommendations, setProjectRecommendations] = useState<ProjectRecommendation[]>([]);
   const [projectSessionId, setProjectSessionId] = useState<string | null>(null);
   const [projectChats, setProjectChats] = useState<Record<string, ProjectChatMessage[]>>({});
+  const [completedProjectIds, setCompletedProjectIds] = useState<string[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectChatLoading, setProjectChatLoading] = useState(false);
+  const [projectCompleteLoading, setProjectCompleteLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState<ProjectRecommendation | null>(null);
   const [projectMessages, setProjectMessages] = useState<ProjectChatMessage[]>([]);
   const [projectQuestion, setProjectQuestion] = useState('');
@@ -1416,6 +1488,7 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
     setProjectRecommendations([]);
     setProjectSessionId(null);
     setProjectChats({});
+    setCompletedProjectIds([]);
 
     setProjectsLoading(true);
     if (!hasSupabase || !supabase || !user) {
@@ -1450,6 +1523,9 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
         }
         if (data?.chats && typeof data.chats === 'object') {
           setProjectChats(data.chats);
+        }
+        if (Array.isArray(data?.completedProjectIds)) {
+          setCompletedProjectIds(data.completedProjectIds);
         }
       })
       .catch((error) => {
@@ -1522,6 +1598,31 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
     setProjectChats((chats) => ({ ...chats, [selectedProject.id]: nextMessages }));
   }
 
+  async function completeSelectedProject() {
+    if (!selectedProject) return;
+    const optimistic = Array.from(new Set([...completedProjectIds, selectedProject.id]));
+    setCompletedProjectIds(optimistic);
+
+    if (!hasSupabase || !supabase || !projectSessionId) return;
+
+    setProjectCompleteLoading(true);
+    const { data, error } = await supabase.functions.invoke<ProjectCoachCompleteResponse>('project-coach', {
+      body: {
+        action: 'complete',
+        sessionId: projectSessionId,
+        projectId: selectedProject.id,
+      },
+    });
+    setProjectCompleteLoading(false);
+
+    if (!error && !data?.error && Array.isArray(data?.completedProjectIds)) {
+      setCompletedProjectIds(data.completedProjectIds);
+      return;
+    }
+
+    console.warn('Could not save completed project.', error ?? data?.error);
+  }
+
   const recommended = [
     { title: 'Frontend Developer', detail: 'Practice React, UI systems, and portfolio storytelling.' },
     { title: 'Data Analyst', detail: 'Sharpen SQL, dashboards, stakeholder communication, and metrics.' },
@@ -1534,6 +1635,7 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
   ];
   const dashboardName = profile.professionalProfile.fullName || displayNameFor(user);
   const dashboardTitle = profile.professionalProfile.currentDesignation || profile.professionLabel || profile.professionalProfile.headline || 'Career profile';
+  const dashboardQuizScore = overallQuizScore(normalizedQuizScores(metrics));
   const nextStepActions: Array<{ label: string; action: () => void }> = [
     { label: nextSteps[0], action: () => setView('professional-profile') },
     { label: nextSteps[1], action: () => setView(metrics.lastCvScore == null ? 'cv-upload' : 'cv-analysis') },
@@ -1583,8 +1685,8 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
           </div>
           <div className="soft-stat">
             <span className="label">Quiz</span>
-            <span className="soft-stat-value">{metrics.lastQuizScore != null ? `${metrics.lastQuizScore}%` : '--'}</span>
-            <span className="soft-stat-label">{metrics.lastQuizLevel ?? 'AI readiness'}</span>
+            <span className="soft-stat-value">{dashboardQuizScore != null ? `${dashboardQuizScore}%` : '--'}</span>
+            <span className="soft-stat-label">{dashboardQuizScore != null ? `${quizLevel(dashboardQuizScore)} overall` : 'AI readiness'}</span>
           </div>
         </div>
       </div>
@@ -1649,9 +1751,11 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
                   </div>
                 </div>
               )) : projectRecommendations.map((project) => (
-                <button className="project-card" key={project.id} onClick={() => openProject(project)} type="button">
+                <button className={`project-card ${completedProjectIds.includes(project.id) ? 'completed' : ''}`} key={project.id} onClick={() => openProject(project)} type="button">
                   <div className="row between">
-                    <span className="mini-pill">{project.difficulty}</span>
+                    <span className={`mini-pill ${completedProjectIds.includes(project.id) ? 'success' : ''}`}>
+                      {completedProjectIds.includes(project.id) ? 'Completed' : project.difficulty}
+                    </span>
                     <span className="caption muted">{project.timeline}</span>
                   </div>
                   <div>
@@ -1735,7 +1839,10 @@ function Home({ user, profile, metrics, usage, setView, setUsage }: CommonProps)
         question={projectQuestion}
         setQuestion={setProjectQuestion}
         onAsk={askProjectQuestion}
-          chatLoading={projectChatLoading}
+        chatLoading={projectChatLoading}
+        completed={completedProjectIds.includes(selectedProject.id)}
+        completeLoading={projectCompleteLoading}
+        onComplete={completeSelectedProject}
         onClose={() => setSelectedProject(null)}
       />
     ) : null}
@@ -1751,6 +1858,9 @@ function ProjectDetailModal({
   setQuestion,
   onAsk,
   chatLoading,
+  completed,
+  completeLoading,
+  onComplete,
   onClose,
 }: {
   project: ProjectRecommendation;
@@ -1760,6 +1870,9 @@ function ProjectDetailModal({
   setQuestion: (value: string) => void;
   onAsk: () => void;
   chatLoading: boolean;
+  completed: boolean;
+  completeLoading: boolean;
+  onComplete: () => void;
   onClose: () => void;
 }) {
   const role = profile.professionLabel || profile.professionalProfile.currentDesignation || 'your target role';
@@ -1773,7 +1886,12 @@ function ProjectDetailModal({
             <h2 className="title" style={{ marginTop: 10 }}>{project.title}</h2>
             <p className="body muted" style={{ marginTop: 8 }}>{project.summary}</p>
           </div>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
+          <div className="row" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <Button variant={completed ? 'secondary' : undefined} onClick={onComplete} disabled={completed || completeLoading}>
+              {completed ? 'Completed' : completeLoading ? 'Saving...' : 'Mark Complete'}
+            </Button>
+            <Button variant="ghost" onClick={onClose}>Close</Button>
+          </div>
         </div>
 
         <div className="project-modal-layout">
@@ -2008,6 +2126,18 @@ function normalizeQuizQuestions(value: unknown, fallback: QuizQuestion[]): QuizQ
   return questions.length ? questions : fallback;
 }
 
+function normalizedQuizScores(metrics: MetricsState): Array<number | null> {
+  const scores = Array.isArray(metrics.quizScores) ? metrics.quizScores.slice(0, FREE_QUIZ_LIMIT) : [];
+  while (scores.length < FREE_QUIZ_LIMIT) scores.push(null);
+  return scores.map((score) => typeof score === 'number' ? Math.round(score) : null);
+}
+
+function overallQuizScore(scores: Array<number | null>) {
+  const completed = scores.filter((score): score is number => typeof score === 'number');
+  if (!completed.length) return null;
+  return Math.round(completed.reduce((sum, score) => sum + score, 0) / completed.length);
+}
+
 function Quiz({ profile, metrics, setMetrics }: CommonProps) {
   const fallbackQuestions = useMemo(() => buildQuiz(profile, 0), [profile]);
   const [questions, setQuestions] = useState<QuizQuestion[]>(fallbackQuestions);
@@ -2021,6 +2151,8 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
   const [answers, setAnswers] = useState<number[]>([]);
   const [result, setResult] = useState<{ score: number; level: string; correct: number } | null>(null);
   const current = questions[currentIndex];
+  const quizScores = normalizedQuizScores(metrics);
+  const currentOverall = overallQuizScore(quizScores);
 
   useEffect(() => {
     let active = true;
@@ -2099,10 +2231,18 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
     }
     const correct = nextAnswers.reduce((sum, answer, index) => sum + (answer === questions[index].correctIndex ? 1 : 0), 0);
     const score = Math.round((correct / questions.length) * 100);
-    const level = quizLevel(score);
     setAnswers(nextAnswers);
-    setResult({ score, level, correct });
-    setMetrics((m) => ({ ...m, lastQuizScore: score, lastQuizLevel: level }));
+    const nextQuizScores = normalizedQuizScores(metrics);
+    nextQuizScores[quizIndex] = score;
+    const overall = overallQuizScore(nextQuizScores) ?? score;
+    const level = quizLevel(overall);
+    setResult({ score, level: quizLevel(score), correct });
+    setMetrics((m) => ({
+      ...m,
+      quizScores: nextQuizScores,
+      lastQuizScore: overall,
+      lastQuizLevel: level,
+    }));
 
     if (hasSupabase && supabase && quizSessionId) {
       const payload = nextAnswers.map((answer, index) => ({
@@ -2140,8 +2280,21 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
         <div className="card stack" style={{ textAlign: 'center' }}>
           <div className="icon-box" style={{ margin: '0 auto', background: 'var(--primary)', color: 'white' }}>🏆</div>
           <h2 className="display" style={{ color: 'var(--gold)' }}>{result.score}%</h2>
-          <p className="title">{result.level} Level</p>
-          <p className="body muted">{result.correct} of {questions.length} correct. This score is now shown on your dashboard.</p>
+          <p className="title">Quiz {quizIndex + 1}: {result.level} Level</p>
+          <p className="body muted">{result.correct} of {questions.length} correct.</p>
+          <div className="quiz-score-grid">
+            {normalizedQuizScores({ ...metrics, quizScores: quizScores.map((item, index) => index === quizIndex ? result.score : item) }).map((scoreItem, index) => (
+              <div className="quiz-score-pill" key={`quiz-score-${index}`}>
+                <span className="label">Quiz {index + 1}</span>
+                <strong>{scoreItem != null ? `${scoreItem}%` : '--'}</strong>
+              </div>
+            ))}
+            <div className="quiz-score-pill overall">
+              <span className="label">Overall</span>
+              <strong>{overallQuizScore(quizScores.map((item, index) => index === quizIndex ? result.score : item)) ?? result.score}%</strong>
+            </div>
+          </div>
+          <p className="body muted">Overall quiz score is shown on your dashboard.</p>
         </div>
         <div className="row between">
           <h2 className="title">Answer Review</h2>
@@ -2187,7 +2340,19 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
       </div>
       <div className="grid">
         <div className="card"><p className="caption muted">Profile</p><h2 className="subtitle">{profile.professionLabel || 'Profession not set'}</h2></div>
-        <div className="card"><p className="caption muted">Last Level</p><h2 className="subtitle">{metrics.lastQuizScore != null ? `${metrics.lastQuizLevel} ${metrics.lastQuizScore}%` : 'Not taken'}</h2></div>
+        <div className="card"><p className="caption muted">Overall Quiz Score</p><h2 className="subtitle">{currentOverall != null ? `${quizLevel(currentOverall)} ${currentOverall}%` : 'Not taken'}</h2></div>
+      </div>
+      <div className="quiz-score-grid">
+        {quizScores.map((scoreItem, index) => (
+          <div className="quiz-score-pill" key={`quiz-progress-${index}`}>
+            <span className="label">Quiz {index + 1}</span>
+            <strong>{scoreItem != null ? `${scoreItem}%` : '--'}</strong>
+          </div>
+        ))}
+        <div className="quiz-score-pill overall">
+          <span className="label">Overall</span>
+          <strong>{currentOverall != null ? `${currentOverall}%` : '--'}</strong>
+        </div>
       </div>
       {quizNotice ? (
         <div className="card row between quiz-notice">

@@ -1164,6 +1164,13 @@ textarea.input {
     color-mix(in srgb, var(--elevated) 82%, transparent);
 }
 
+.project-card.completed {
+  border-color: color-mix(in srgb, var(--success) 36%, var(--border));
+  background:
+    radial-gradient(circle at 90% 8%, color-mix(in srgb, var(--success) 14%, transparent), transparent 9rem),
+    color-mix(in srgb, var(--success-tint) 42%, var(--surface));
+}
+
 .skeleton-card {
   pointer-events: none;
 }
@@ -2487,6 +2494,35 @@ textarea.input.chat-textarea {
     var(--card);
 }
 
+.quiz-score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quiz-score-pill {
+  min-height: 78px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+
+.quiz-score-pill strong {
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.quiz-score-pill.overall {
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  background: color-mix(in srgb, var(--primary-tint) 58%, var(--surface));
+}
+
 .quiz-answer-box {
   min-height: 92px;
   border: 1px solid var(--border);
@@ -2583,6 +2619,7 @@ textarea.input.chat-textarea {
   .project-card-grid,
   .project-detail-grid,
   .project-modal-layout,
+  .quiz-score-grid,
   .dashboard-action-grid,
   .analysis-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2703,6 +2740,7 @@ textarea.input.chat-textarea {
   .project-card-grid,
   .project-detail-grid,
   .project-modal-layout,
+  .quiz-score-grid,
   .dashboard-action-grid,
   .analysis-steps {
     grid-template-columns: 1fr;

@@ -36,6 +36,11 @@ type Body =
       sessionId: string;
       projectId: string;
       question: string;
+    }
+  | {
+      action: 'complete';
+      sessionId: string;
+      projectId: string;
     };
 
 function text(value: unknown) {
@@ -129,6 +134,10 @@ function fallbackProjects(profile: Record<string, unknown>, metrics: Record<stri
 
 function initialProjectMessage(project: ProjectRecommendation) {
   return `I recommend "${project.title}" because it can strengthen your profile with practical proof. Ask me about scope, stack, README, GitHub, timeline, or interview explanation.`;
+}
+
+function completedIds(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
 }
 
 async function generateProjects(profile: Record<string, unknown>, metrics: Record<string, unknown>) {
@@ -233,6 +242,31 @@ Deno.serve(async (req) => {
     if (body.action === 'recommend') {
       const profile = body.profile ?? {};
       const metrics = body.metrics ?? {};
+      const { data: sessions, error: reuseError } = await supabase
+        .from('ai_project_recommendation_sessions')
+        .select('id, recommendations, chats, completed_project_ids, updated_at')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (reuseError) throw reuseError;
+
+      const latest = Array.isArray(sessions) ? sessions[0] : null;
+      if (latest && Array.isArray(latest.recommendations) && latest.recommendations.length) {
+        const completed = completedIds(latest.completed_project_ids);
+        const recommendations = latest.recommendations.map(normalizeProject);
+        const allCompleted = recommendations.every((project) => completed.includes(project.id));
+        if (!allCompleted) {
+          return jsonResponse({
+            sessionId: latest.id,
+            recommendations,
+            chats: latest.chats ?? {},
+            completedProjectIds: completed,
+            reused: true,
+          });
+        }
+      }
+
       const recommendations = await generateProjects(profile, metrics);
 
       const { data, error } = await supabase
@@ -243,21 +277,28 @@ Deno.serve(async (req) => {
           metrics_snapshot: metrics,
           recommendations,
           chats: {},
+          completed_project_ids: [],
         })
-        .select('id, recommendations, chats')
+        .select('id, recommendations, chats, completed_project_ids')
         .single();
 
       if (error) throw error;
-      return jsonResponse({ sessionId: data.id, recommendations: data.recommendations, chats: data.chats ?? {} });
+      return jsonResponse({
+        sessionId: data.id,
+        recommendations: data.recommendations,
+        chats: data.chats ?? {},
+        completedProjectIds: data.completed_project_ids ?? [],
+        reused: false,
+      });
     }
 
-    if (!body.sessionId || !body.projectId || !body.question?.trim()) {
-      return jsonResponse({ error: 'sessionId, projectId, and question are required' }, 400);
+    if (!body.sessionId || !body.projectId) {
+      return jsonResponse({ error: 'sessionId and projectId are required' }, 400);
     }
 
     const { data: session, error: fetchError } = await supabase
       .from('ai_project_recommendation_sessions')
-      .select('id, profile_snapshot, metrics_snapshot, recommendations, chats')
+      .select('id, profile_snapshot, metrics_snapshot, recommendations, chats, completed_project_ids')
       .eq('id', body.sessionId)
       .eq('user_id', user.id)
       .single();
@@ -269,6 +310,21 @@ Deno.serve(async (req) => {
       : [];
     const project = recommendations.find((item) => item.id === body.projectId);
     if (!project) return jsonResponse({ error: 'Project not found' }, 404);
+
+    if (body.action === 'complete') {
+      const completed = Array.from(new Set([...completedIds(session.completed_project_ids), body.projectId]));
+      const { error: updateError } = await supabase
+        .from('ai_project_recommendation_sessions')
+        .update({ completed_project_ids: completed })
+        .eq('id', body.sessionId)
+        .eq('user_id', user.id);
+      if (updateError) throw updateError;
+      return jsonResponse({ completedProjectIds: completed });
+    }
+
+    if (!body.question?.trim()) {
+      return jsonResponse({ error: 'question is required' }, 400);
+    }
 
     const chats = session.chats && typeof session.chats === 'object'
       ? session.chats as Record<string, ChatMessage[]>
