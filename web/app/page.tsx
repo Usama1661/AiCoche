@@ -3,6 +3,8 @@
 import { createClient, type User } from '@supabase/supabase-js';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { isAcceptableSkillLabel } from '@/lib/skillValidation';
+import { consumeContinueInterviewStream } from '@/lib/continueInterviewStream';
+import { consumeStartInterviewStream } from '@/lib/startInterviewStream';
 import {
   browserSupportsSpeechRecognition,
   cancelAllSpeech,
@@ -3407,6 +3409,9 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
   const [sessionId, setSessionId] = useState('');
   const [typing, setTyping] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [bootstrapStreamText, setBootstrapStreamText] = useState('');
+  /** Live assistant text while a typed answer is streaming (continue-interview-stream). */
+  const [turnStreamText, setTurnStreamText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const interviewUsageCountedRef = useRef(false);
   const interviewStartedRef = useRef(false);
@@ -3446,22 +3451,81 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
         return;
       }
       setTyping(true);
+      setBootstrapStreamText('');
+      let appliedFromReady = false;
       try {
         let response: { sessionId: string; question: string };
         if (hasSupabase && supabase) {
-          const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
-            body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
-          });
-          if (error) throw error;
-          response = normalizeStartInterviewResponse(data, profile);
+          const { data: auth } = await supabase.auth.getSession();
+          const token = auth.session?.access_token;
+          if (token) {
+            try {
+              let firstDelta = true;
+              let qBuf = '';
+              response = await consumeStartInterviewStream({
+                supabaseUrl,
+                anonKey: supabaseAnonKey,
+                accessToken: token,
+                profile: buildUserProfile(profile),
+                metrics: buildProjectMetricsSnapshot(metrics),
+                onDelta: (c) => {
+                  if (firstDelta) {
+                    firstDelta = false;
+                    setTyping(false);
+                  }
+                  qBuf += c;
+                  setBootstrapStreamText(qBuf);
+                },
+                onSpeakReady: (p) => {
+                  appliedFromReady = true;
+                  setSessionId(p.sessionId);
+                  const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: p.question }];
+                  setMessages(initialMessages);
+                  setBootstrapStreamText('');
+                  saveSessionHistory({ id: p.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+                  consumeInterviewCreditOnce();
+                },
+              });
+              if (!appliedFromReady) {
+                setSessionId(response.sessionId);
+                const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: response.question }];
+                setMessages(initialMessages);
+                saveSessionHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+                consumeInterviewCreditOnce();
+              }
+            } catch {
+              setBootstrapStreamText('');
+              const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
+                body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+              });
+              if (error) throw error;
+              response = normalizeStartInterviewResponse(data, profile);
+              setSessionId(response.sessionId);
+              const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: response.question }];
+              setMessages(initialMessages);
+              saveSessionHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+              consumeInterviewCreditOnce();
+            }
+          } else {
+            const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
+              body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+            });
+            if (error) throw error;
+            response = normalizeStartInterviewResponse(data, profile);
+            setSessionId(response.sessionId);
+            const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: response.question }];
+            setMessages(initialMessages);
+            saveSessionHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+            consumeInterviewCreditOnce();
+          }
         } else {
           response = mockStart(profile);
+          setSessionId(response.sessionId);
+          const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: response.question }];
+          setMessages(initialMessages);
+          saveSessionHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+          consumeInterviewCreditOnce();
         }
-        setSessionId(response.sessionId);
-        const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: response.question }];
-        setMessages(initialMessages);
-        saveSessionHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
-        consumeInterviewCreditOnce();
       } catch (e) {
         const fallback = mockStart(profile);
         setSessionId(fallback.sessionId);
@@ -3472,6 +3536,7 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
         setError(e instanceof Error ? `Using offline interview mode: ${e.message}` : 'Using offline interview mode.');
       } finally {
         setTyping(false);
+        setBootstrapStreamText('');
       }
     }
     void start();
@@ -3480,7 +3545,7 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, typing]);
+  }, [messages, typing, bootstrapStreamText, turnStreamText]);
 
   async function send() {
     const answer = input.trim();
@@ -3488,17 +3553,51 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
     const userMessage: Message = { id: id(), role: 'user', content: answer };
     const answeredMessages = [...messages, userMessage];
     const userAnswerCount = answeredMessages.filter((message) => message.role === 'user').length;
+    const closingLine = 'That completes this mock interview. Great work!';
     setInput('');
     setMessages(answeredMessages);
     setTyping(true);
+    setTurnStreamText('');
     try {
       let response: { feedback: string; score: number; nextQuestion: string | null; finished: boolean };
       if (hasSupabase && supabase && sessionId) {
-        const { data, error } = await supabase.functions.invoke<typeof response>('continue-interview', {
-          body: { sessionId, answer },
-        });
-        if (error) throw error;
-        response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
+        const { data: auth } = await supabase.auth.getSession();
+        const token = auth.session?.access_token;
+        if (token) {
+          try {
+            let firstDelta = true;
+            let buf = '';
+            const MARK = '<<<SPLIT>>>';
+            response = await consumeContinueInterviewStream({
+              supabaseUrl,
+              anonKey: supabaseAnonKey,
+              accessToken: token,
+              sessionId,
+              answer,
+              onDelta: (c) => {
+                if (firstDelta) {
+                  firstDelta = false;
+                  setTyping(false);
+                }
+                buf += c;
+                setTurnStreamText(buf.split(MARK).join('\n\n'));
+              },
+            });
+          } catch {
+            setTurnStreamText('');
+            const { data, error } = await supabase.functions.invoke<typeof response>('continue-interview', {
+              body: { sessionId, answer },
+            });
+            if (error) throw error;
+            response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
+          }
+        } else {
+          const { data, error } = await supabase.functions.invoke<typeof response>('continue-interview', {
+            body: { sessionId, answer },
+          });
+          if (error) throw error;
+          response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
+        }
       } else {
         await new Promise((r) => setTimeout(r, 600));
         response = mockContinue(
@@ -3510,10 +3609,11 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
       const nextMessages: Message[] = [
         ...answeredMessages,
         { id: id(), role: 'assistant', content: response.feedback, score: response.score },
-        ...(response.nextQuestion ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }] : [{ id: id(), role: 'assistant' as const, content: 'That completes this mock interview. Great work!' }]),
+        ...(response.nextQuestion ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }] : [{ id: id(), role: 'assistant' as const, content: closingLine }]),
       ];
       const status = response.finished ? 'completed' : 'active';
       if (response.finished) setSessionEnded(true);
+      setTurnStreamText('');
       setMessages(nextMessages);
       saveSessionHistory({
         id: sessionId || id(),
@@ -3540,6 +3640,7 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
       setError(e instanceof Error ? e.message : 'Request failed');
     } finally {
       setTyping(false);
+      setTurnStreamText('');
     }
   }
 
@@ -3553,6 +3654,8 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
       </section>
     );
   }
+
+  const interviewLiveBody = bootstrapStreamText || turnStreamText;
 
   return (
     <section className="screen interview-screen">
@@ -3571,7 +3674,9 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
             <p className="caption muted">AI interview coach</p>
             <h2 className="subtitle">{profile.professionLabel || 'Career'} practice session</h2>
           </div>
-          <span className={`chat-status ${typing ? 'active' : ''}`}>{typing ? 'Typing...' : 'Live'}</span>
+          <span className={`chat-status ${typing || interviewLiveBody ? 'active' : ''}`}>
+            {interviewLiveBody ? 'Streaming…' : typing ? 'Typing...' : 'Live'}
+          </span>
         </div>
 
         <div className="chat-scroll" aria-live="polite">
@@ -3585,7 +3690,16 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
               </div>
             </div>
           ))}
-          {typing ? (
+          {interviewLiveBody ? (
+            <div className="chat-row from-ai voice-stream-live-row">
+              <div className="chat-avatar">AI</div>
+              <div className="message">
+                <span className="message-label">{bootstrapStreamText ? 'First question · live' : 'AiCoche · live'}</span>
+                <p className="body voice-stream-live-text">{interviewLiveBody}</p>
+              </div>
+            </div>
+          ) : null}
+          {typing && !interviewLiveBody ? (
             <div className="chat-row from-ai">
               <div className="chat-avatar">AI</div>
               <div className="message typing-bubble" aria-label="AiCoche is typing">
@@ -3619,6 +3733,51 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
       </div>
     </section>
   );
+}
+
+/** Spoken only (not added to transcript) — natural handoff after feedback, before the next question. */
+function pickVoiceFeedbackToQuestionBridge(): string {
+  const lines = [
+    'Okay — building on that, here’s what I’d like to ask next.',
+    'Alright, let’s keep going. Next question for you.',
+    'Thanks for that. Let me take you to the next one.',
+    'Good — I appreciate the detail. Here’s the next question.',
+    'Right, that helps. Moving on — next question.',
+    'Mm-hmm. So, carrying that forward — what’s next is this.',
+    'Fair enough. Let’s shift slightly — next question.',
+    'Got it. Let’s stay with that thread — here’s what I want to explore next.',
+    'Useful context. Next piece for you:',
+    'Okay, so let’s move to the next question.',
+    'I follow you. Let’s go one step further — next question.',
+    'That’s clear. Here’s something related I’d like to hear about.',
+    'Nice — let’s build on that. Next:',
+    'Understood. For the next part of our conversation —',
+  ];
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
+/** Spoken only before the closing line when there is no further question. */
+function pickVoiceFeedbackToClosingBridge(): string {
+  const lines = [
+    'We’re at a natural wrap-up point — one last thought from me.',
+    'Let’s land this round here — closing note.',
+    'Good place to pause — I’ll leave you with this.',
+    'Alright — we’ll wrap this practice session on a high note.',
+    'Thanks for working through that — last bit from my side.',
+  ];
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
+/** Spoken only between scripted welcome and the first interview question. */
+function pickWelcomeToFirstQuestionBridge(): string {
+  const lines = [
+    'Whenever you’re ready — here’s where I’d like to start.',
+    'Let’s dive in — first question for you.',
+    'Great — I’ll open with this.',
+    'Perfect. Let’s begin with a question.',
+    'Thanks again for joining — here’s my first question.',
+  ];
+  return lines[Math.floor(Math.random() * lines.length)];
 }
 
 /** Short spoken welcome before the first interview question (voice UX). */
@@ -3665,12 +3824,22 @@ function VoiceInterviewSession({
   const [reflecting, setReflecting] = useState(false);
 
   /** Pause between spoken chunks (feedback vs next question) — shorter feels more like a live interviewer. */
-  const VOICE_GAP_MS = 560;
+  const VOICE_GAP_MS = 480;
   /** Tiny beat before first audio so UI can paint; kept small so voice follows text quickly. */
   const VOICE_LEAD_IN_FIRST_MS = 90;
-  /** After model returns, brief pause before TTS (was ~0.5–0.9s; too long vs transcript). */
-  const REFLECT_MIN_MS = 120;
-  const REFLECT_JITTER_MS = 140;
+  /** After model returns, tiny pause before TTS so the transcript can paint (LLM wait is already the main delay). */
+  const REFLECT_MIN_MS = 0;
+  const REFLECT_JITTER_MS = 45;
+
+  /** Whole turn (stream + TTS) — blocks mic without relying on `typing` alone. */
+  const [voiceReplyBusy, setVoiceReplyBusy] = useState(false);
+  /** Raw streamed assistant text (markers hidden for display). */
+  const [voiceStreamReply, setVoiceStreamReply] = useState('');
+  const voiceStreamAccRef = useRef('');
+  const voiceFeedbackTtsStartedRef = useRef(false);
+  const voiceTtsChainRef = useRef(Promise.resolve());
+  /** Server sent `ready` and we already queued post-stream TTS (avoids double-speak on old clients). */
+  const voiceSpeakReadyTtsRef = useRef(false);
 
   function stopAiVoiceOutput() {
     cancelAllSpeech();
@@ -3686,6 +3855,12 @@ function VoiceInterviewSession({
     stopAiVoiceOutput();
     setReflecting(false);
     setTyping(false);
+    setVoiceReplyBusy(false);
+    setVoiceStreamReply('');
+    voiceStreamAccRef.current = '';
+    voiceFeedbackTtsStartedRef.current = false;
+    voiceSpeakReadyTtsRef.current = false;
+    voiceTtsChainRef.current = Promise.resolve();
     setSessionEnded(true);
   }
 
@@ -3746,34 +3921,122 @@ function VoiceInterviewSession({
         return;
       }
       setTyping(true);
+      const welcome = voiceInterviewerWelcomeCopy(profile);
+      setMessages([{ id: id(), role: 'assistant', content: welcome }]);
+      setVoiceStreamReply('');
+      let speakStartedFromReady = false;
+      let firstDelta = true;
       try {
         let response: { sessionId: string; question: string };
         if (hasSupabase && supabase) {
-          const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
-            body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
-          });
-          if (error) throw error;
-          response = normalizeStartInterviewResponse(data, profile);
+          const { data: auth } = await supabase.auth.getSession();
+          const token = auth.session?.access_token;
+          if (token) {
+            try {
+              let qBuf = '';
+              response = await consumeStartInterviewStream({
+                supabaseUrl,
+                anonKey: supabaseAnonKey,
+                accessToken: token,
+                profile: buildUserProfile(profile),
+                metrics: buildProjectMetricsSnapshot(metrics),
+                onDelta: (c) => {
+                  if (firstDelta) {
+                    firstDelta = false;
+                    setTyping(false);
+                  }
+                  qBuf += c;
+                  setVoiceStreamReply(qBuf);
+                },
+                onSpeakReady: (p) => {
+                  speakStartedFromReady = true;
+                  setSessionId(p.sessionId);
+                  const initialMessages: Message[] = [
+                    { id: id(), role: 'assistant', content: welcome },
+                    { id: id(), role: 'assistant', content: p.question },
+                  ];
+                  setMessages(initialMessages);
+                  setVoiceStreamReply('');
+                  saveVoiceHistory({ id: p.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+                  consumeInterviewCreditOnce();
+                  void speakAsInterviewer([welcome, pickWelcomeToFirstQuestionBridge(), p.question], {
+                    leadInMs: VOICE_LEAD_IN_FIRST_MS,
+                    pauseBetweenMs: 420,
+                  });
+                },
+              });
+              if (!speakStartedFromReady) {
+                setSessionId(response.sessionId);
+                const initialMessages: Message[] = [
+                  { id: id(), role: 'assistant', content: welcome },
+                  { id: id(), role: 'assistant', content: response.question },
+                ];
+                setMessages(initialMessages);
+                setVoiceStreamReply('');
+                saveVoiceHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+                consumeInterviewCreditOnce();
+                void speakAsInterviewer([welcome, pickWelcomeToFirstQuestionBridge(), response.question], {
+                  leadInMs: VOICE_LEAD_IN_FIRST_MS,
+                  pauseBetweenMs: 420,
+                });
+              }
+            } catch {
+              setVoiceStreamReply('');
+              const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
+                body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+              });
+              if (error) throw error;
+              response = normalizeStartInterviewResponse(data, profile);
+              setSessionId(response.sessionId);
+              const initialMessages: Message[] = [
+                { id: id(), role: 'assistant', content: welcome },
+                { id: id(), role: 'assistant', content: response.question },
+              ];
+              setMessages(initialMessages);
+              saveVoiceHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+              consumeInterviewCreditOnce();
+              void speakAsInterviewer([welcome, pickWelcomeToFirstQuestionBridge(), response.question], {
+                leadInMs: VOICE_LEAD_IN_FIRST_MS,
+                pauseBetweenMs: 420,
+              });
+            }
+          } else {
+            const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
+              body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+            });
+            if (error) throw error;
+            response = normalizeStartInterviewResponse(data, profile);
+            setSessionId(response.sessionId);
+            const initialMessages: Message[] = [
+              { id: id(), role: 'assistant', content: welcome },
+              { id: id(), role: 'assistant', content: response.question },
+            ];
+            setMessages(initialMessages);
+            saveVoiceHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+            consumeInterviewCreditOnce();
+            void speakAsInterviewer([welcome, pickWelcomeToFirstQuestionBridge(), response.question], {
+              leadInMs: VOICE_LEAD_IN_FIRST_MS,
+              pauseBetweenMs: 420,
+            });
+          }
         } else {
           response = mockStart(profile);
+          setSessionId(response.sessionId);
+          const initialMessages: Message[] = [
+            { id: id(), role: 'assistant', content: welcome },
+            { id: id(), role: 'assistant', content: response.question },
+          ];
+          setMessages(initialMessages);
+          saveVoiceHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+          consumeInterviewCreditOnce();
+          void speakAsInterviewer([welcome, pickWelcomeToFirstQuestionBridge(), response.question], {
+            leadInMs: VOICE_LEAD_IN_FIRST_MS,
+            pauseBetweenMs: 420,
+          });
         }
-        setSessionId(response.sessionId);
-        const welcome = voiceInterviewerWelcomeCopy(profile);
-        const initialMessages: Message[] = [
-          { id: id(), role: 'assistant', content: welcome },
-          { id: id(), role: 'assistant', content: response.question },
-        ];
-        setMessages(initialMessages);
-        saveVoiceHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
-        consumeInterviewCreditOnce();
-        void speakAsInterviewer([welcome, response.question], {
-          leadInMs: VOICE_LEAD_IN_FIRST_MS,
-          pauseBetweenMs: 420,
-        });
       } catch (e) {
         const fallback = mockStart(profile);
         setSessionId(fallback.sessionId);
-        const welcome = voiceInterviewerWelcomeCopy(profile);
         const initialMessages: Message[] = [
           { id: id(), role: 'assistant', content: welcome },
           { id: id(), role: 'assistant', content: fallback.question },
@@ -3782,21 +4045,18 @@ function VoiceInterviewSession({
         saveVoiceHistory({ id: fallback.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
         consumeInterviewCreditOnce();
         setError(e instanceof Error ? `Using offline interview mode: ${e.message}` : 'Using offline interview mode.');
-        void speakAsInterviewer([welcome, fallback.question], {
+        void speakAsInterviewer([welcome, pickWelcomeToFirstQuestionBridge(), fallback.question], {
           leadInMs: VOICE_LEAD_IN_FIRST_MS,
           pauseBetweenMs: 420,
         });
       } finally {
         setTyping(false);
+        setVoiceStreamReply('');
       }
     }
     void start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cvReady]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, typing]);
 
   useEffect(() => {
     return () => {
@@ -3806,35 +4066,147 @@ function VoiceInterviewSession({
     };
   }, []);
 
+  const voiceStreamLive = voiceStreamReply.length > 0;
   const voiceStatusLabel = sessionEnded
     ? 'Session complete'
     : reflecting
       ? 'Taking a moment…'
-      : typing
-        ? 'Thinking…'
-        : aiSpeaking
-          ? 'AiCoche is speaking'
+      : aiSpeaking
+        ? 'AiCoche is speaking'
+        : voiceStreamLive
+          ? 'Live reply…'
+        : typing || voiceReplyBusy
+          ? 'Thinking…'
           : listening
             ? 'Listening…'
             : 'Your turn — tap to speak below';
 
   async function sendAnswer(answer: string) {
     const trimmed = answer.trim();
-    if (!trimmed || typing || sessionEnded) return;
+    if (!trimmed || voiceReplyBusy || sessionEnded) return;
     const userMessage: Message = { id: id(), role: 'user', content: trimmed };
     const answeredMessages = [...messages, userMessage];
     const userAnswerCount = answeredMessages.filter((message) => message.role === 'user').length;
     setMessages(answeredMessages);
+    setVoiceReplyBusy(true);
     setTyping(true);
     stopAiVoiceOutput();
+    voiceTtsChainRef.current = Promise.resolve();
+    voiceFeedbackTtsStartedRef.current = false;
+    voiceSpeakReadyTtsRef.current = false;
+    voiceStreamAccRef.current = '';
+    setVoiceStreamReply('');
+    let usedStreamSuccess = false;
+
+    const closingLine = 'That completes this mock interview. Great work!';
+    const queueVoiceReplyTtsFromReady = (p: { feedback: string; nextQuestion: string | null }) => {
+      voiceSpeakReadyTtsRef.current = true;
+      const nq = p.nextQuestion?.trim() || null;
+      if (voiceFeedbackTtsStartedRef.current) {
+        if (nq) {
+          voiceTtsChainRef.current = voiceTtsChainRef.current
+            .catch(() => {})
+            .then(() =>
+              speakAsInterviewer([pickVoiceFeedbackToQuestionBridge(), nq], {
+                pauseBetweenMs: VOICE_GAP_MS,
+                leadInMs: 18,
+              })
+            );
+        } else {
+          voiceTtsChainRef.current = voiceTtsChainRef.current
+            .catch(() => {})
+            .then(() =>
+              speakAsInterviewer([pickVoiceFeedbackToClosingBridge(), closingLine], {
+                pauseBetweenMs: VOICE_GAP_MS,
+                leadInMs: 18,
+              })
+            );
+        }
+      } else {
+        const spoken = nq
+          ? [p.feedback, pickVoiceFeedbackToQuestionBridge(), nq]
+          : [p.feedback, pickVoiceFeedbackToClosingBridge(), closingLine];
+        voiceTtsChainRef.current = voiceTtsChainRef.current
+          .catch(() => {})
+          .then(() =>
+            speakAsInterviewer(spoken, {
+              pauseBetweenMs: VOICE_GAP_MS,
+              leadInMs: 22,
+            })
+          );
+      }
+    };
+
     try {
       let response: { feedback: string; score: number; nextQuestion: string | null; finished: boolean };
+
       if (hasSupabase && supabase && sessionId) {
-        const { data, error } = await supabase.functions.invoke<typeof response>('continue-interview', {
-          body: { sessionId, answer: trimmed },
-        });
-        if (error) throw error;
-        response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
+        const { data: auth } = await supabase.auth.getSession();
+        const token = auth.session?.access_token;
+        if (token) {
+          try {
+            let firstDelta = true;
+            const streamResult = await consumeContinueInterviewStream({
+              supabaseUrl,
+              anonKey: supabaseAnonKey,
+              accessToken: token,
+              sessionId,
+              answer: trimmed,
+              onSpeakReady: queueVoiceReplyTtsFromReady,
+              onDelta: (c) => {
+                if (firstDelta) {
+                  firstDelta = false;
+                  setTyping(false);
+                }
+                voiceStreamAccRef.current += c;
+                const full = voiceStreamAccRef.current;
+                const MARK = '<<<SPLIT>>>';
+                setVoiceStreamReply(full.split(MARK).join('\n\n'));
+                const idx = full.indexOf(MARK);
+                if (idx !== -1 && !voiceFeedbackTtsStartedRef.current) {
+                  const fb = full.slice(0, idx).trim();
+                  if (fb.length > 12) {
+                    voiceFeedbackTtsStartedRef.current = true;
+                    const copy = fb;
+                    voiceTtsChainRef.current = voiceTtsChainRef.current
+                      .catch(() => {})
+                      .then(() =>
+                        speakAsInterviewer([copy], {
+                          pauseBetweenMs: VOICE_GAP_MS,
+                          leadInMs: 18,
+                        })
+                      );
+                  }
+                }
+              },
+            });
+            usedStreamSuccess = true;
+            setVoiceStreamReply('');
+            response = {
+              feedback: streamResult.feedback,
+              score: streamResult.score,
+              nextQuestion: streamResult.nextQuestion,
+              finished: streamResult.finished,
+            };
+          } catch {
+            voiceFeedbackTtsStartedRef.current = false;
+            voiceSpeakReadyTtsRef.current = false;
+            voiceStreamAccRef.current = '';
+            setVoiceStreamReply('');
+            const { data, error } = await supabase.functions.invoke<typeof response>('continue-interview', {
+              body: { sessionId, answer: trimmed },
+            });
+            if (error) throw error;
+            response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
+            usedStreamSuccess = false;
+          }
+        } else {
+          const { data, error } = await supabase.functions.invoke<typeof response>('continue-interview', {
+            body: { sessionId, answer: trimmed },
+          });
+          if (error) throw error;
+          response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
+        }
       } else {
         await new Promise((r) => setTimeout(r, 600));
         response = mockContinue(
@@ -3842,13 +4214,14 @@ function VoiceInterviewSession({
           profile.professionLabel || profile.professionalProfile.currentDesignation || ''
         );
       }
+
       setMetrics((m) => ({ ...m, lastInterviewScore: response.score }));
       const nextMessages: Message[] = [
         ...answeredMessages,
         { id: id(), role: 'assistant', content: response.feedback, score: response.score },
         ...(response.nextQuestion
           ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }]
-          : [{ id: id(), role: 'assistant' as const, content: 'That completes this mock interview. Great work!' }]),
+          : [{ id: id(), role: 'assistant' as const, content: closingLine }]),
       ];
       const status = response.finished ? 'completed' : 'active';
       if (response.finished) setSessionEnded(true);
@@ -3861,6 +4234,7 @@ function VoiceInterviewSession({
         score: response.score,
         turnCount: answeredMessages.filter((message) => message.role === 'user').length,
       });
+      setTyping(false);
       if (hasSupabase && supabase && sessionId) {
         void supabase.functions.invoke('save-interview-session', {
           body: {
@@ -3874,25 +4248,67 @@ function VoiceInterviewSession({
           },
         });
       }
+
       const spoken: string[] = [response.feedback];
-      if (response.nextQuestion) spoken.push(response.nextQuestion);
-      else spoken.push('That completes this mock interview. Great work!');
-      setTyping(false);
-      setReflecting(true);
-      const reflectMs = REFLECT_MIN_MS + Math.floor(Math.random() * REFLECT_JITTER_MS);
-      await new Promise<void>((r) => setTimeout(r, reflectMs));
-      setReflecting(false);
-      await speakAsInterviewer(spoken.filter(Boolean), { pauseBetweenMs: VOICE_GAP_MS, leadInMs: 40 });
+      if (response.nextQuestion?.trim()) {
+        spoken.push(pickVoiceFeedbackToQuestionBridge(), response.nextQuestion.trim());
+      } else {
+        spoken.push(pickVoiceFeedbackToClosingBridge(), closingLine);
+      }
+
+      if (usedStreamSuccess) {
+        if (!voiceSpeakReadyTtsRef.current) {
+          if (voiceFeedbackTtsStartedRef.current) {
+            if (response.nextQuestion?.trim()) {
+              voiceTtsChainRef.current = voiceTtsChainRef.current
+                .catch(() => {})
+                .then(() =>
+                  speakAsInterviewer([pickVoiceFeedbackToQuestionBridge(), response.nextQuestion!.trim()], {
+                    pauseBetweenMs: VOICE_GAP_MS,
+                    leadInMs: 22,
+                  })
+                );
+            } else {
+              voiceTtsChainRef.current = voiceTtsChainRef.current
+                .catch(() => {})
+                .then(() =>
+                  speakAsInterviewer([pickVoiceFeedbackToClosingBridge(), closingLine], {
+                    pauseBetweenMs: VOICE_GAP_MS,
+                    leadInMs: 22,
+                  })
+                );
+            }
+          } else {
+            voiceTtsChainRef.current = voiceTtsChainRef.current
+              .catch(() => {})
+              .then(() =>
+                speakAsInterviewer(spoken, {
+                  pauseBetweenMs: VOICE_GAP_MS,
+                  leadInMs: 28,
+                })
+              );
+          }
+        }
+        await voiceTtsChainRef.current.catch(() => {});
+      } else {
+        setReflecting(true);
+        const reflectMs = REFLECT_MIN_MS + Math.floor(Math.random() * REFLECT_JITTER_MS);
+        await new Promise<void>((r) => setTimeout(r, reflectMs));
+        setReflecting(false);
+        await speakAsInterviewer(spoken, { pauseBetweenMs: VOICE_GAP_MS, leadInMs: 40 });
+      }
     } catch (e) {
       setReflecting(false);
+      setVoiceStreamReply('');
       setError(e instanceof Error ? e.message : 'Request failed');
     } finally {
       setTyping(false);
+      setVoiceReplyBusy(false);
     }
   }
 
   function toggleVoiceCapture() {
-    if (!voiceSupported || typing || sessionEnded || reflecting) return;
+    if (!voiceSupported || typing || voiceReplyBusy || sessionEnded || reflecting) return;
     if (listening) {
       stopRecognitionRef.current?.();
       stopRecognitionRef.current = null;
@@ -3975,7 +4391,7 @@ function VoiceInterviewSession({
                   type="button"
                   className={`voice-mic-button voice-mic-button--hero ${listening ? 'listening' : ''}`}
                   onClick={toggleVoiceCapture}
-                  disabled={typing || reflecting}>
+                  disabled={typing || voiceReplyBusy || reflecting}>
                   {listening ? 'Tap to stop & send' : aiSpeaking ? 'Tap to interrupt & speak' : 'Tap to speak'}
                 </button>
               ) : (
@@ -4017,8 +4433,19 @@ function VoiceInterviewSession({
       <div className="interview-chat-card voice-interview-transcript-card">
         <div className="voice-transcript-toolbar">
           <h2 className="voice-transcript-heading-title">Transcript</h2>
-          <span className={`voice-live-chip ${typing || reflecting || aiSpeaking || listening ? 'on' : ''}`}>
-            {typing ? 'Working' : reflecting ? 'Pausing' : aiSpeaking ? 'Speaking' : listening ? 'Mic on' : 'Idle'}
+          <span
+            className={`voice-live-chip ${typing || reflecting || aiSpeaking || listening || voiceStreamLive ? 'on' : ''}`}>
+            {voiceStreamLive
+              ? 'Live'
+              : typing || voiceReplyBusy
+                ? 'Working'
+                : reflecting
+                  ? 'Pausing'
+                  : aiSpeaking
+                    ? 'Speaking'
+                    : listening
+                      ? 'Mic on'
+                      : 'Idle'}
           </span>
         </div>
 
@@ -4033,7 +4460,16 @@ function VoiceInterviewSession({
               </div>
             </div>
           ))}
-          {typing ? (
+          {voiceStreamReply ? (
+            <div className="chat-row from-ai voice-stream-live-row">
+              <div className="chat-avatar">AI</div>
+              <div className="message">
+                <span className="message-label">AiCoche · live</span>
+                <p className="body voice-stream-live-text">{voiceStreamReply}</p>
+              </div>
+            </div>
+          ) : null}
+          {typing && !voiceStreamReply ? (
             <div className="chat-row from-ai">
               <div className="chat-avatar">AI</div>
               <div className="message typing-bubble" aria-label="AiCoche is typing">
@@ -4514,7 +4950,7 @@ function mockStart(profile: ProfileState) {
         : 'For your next step';
   return {
     sessionId: `mock-session-${id()}`,
-    question: `${exp} in ${role}, what is one concrete project, problem, or outcome from the last year that best shows you can perform in this type of role?`,
+    question: `${exp} — how did you get interested in ${role}, and which part of your background (role, project, or skill) should a hiring manager know about first?`,
   };
 }
 
@@ -4531,11 +4967,11 @@ function mockContinue(userAnswerCount: number, professionLabel: string) {
     };
   }
   const questions = [
-    `In ${field}, how do you validate quality before you ship or merge your work?`,
-    `Describe a tradeoff between speed and quality on a ${field} project. What did you prioritize and why?`,
-    `How do you collaborate with PMs, design, or other engineers on a typical ${field} delivery?`,
-    `What signals or metrics would you watch after releasing a meaningful ${field} change?`,
-    `Where do you want to grow next in ${field}, and what concrete step are you taking this month?`,
+    `Thanks for sharing. In a sentence or two, how would you connect what you just said to the kind of ${field} work you want to do next?`,
+    `What on your profile or resume would you point to as the clearest proof you're building the right skills for ${field}?`,
+    `What are you learning or experimenting with lately that relates to ${field} — even if it's small — and why does it matter to you?`,
+    `Walk me through a realistic ${field} scenario where you had to balance speed and quality. What did you ship, and what would you watch in production?`,
+    `How do you collaborate with PMs, design, or other engineers on a typical ${field} delivery when priorities shift mid-stream?`,
   ];
   const index = userAnswerCount - 1;
   const nextQuestion = questions[index] ?? null;

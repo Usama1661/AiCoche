@@ -1,6 +1,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { continueNextQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
   professionTitle,
@@ -107,10 +108,11 @@ The candidate just answered your previous question. Respond ONLY with valid JSON
 }
 
 Rules for nextQuestion:
-- Must be specific to ${profession} (technical, behavioral, or situational — whatever fits real interviews for THIS role). Avoid generic prompts that could apply to every industry unless follow-up context demands it.
-- Build on the transcript: probe gaps, tradeoffs, metrics, collaboration, or specifics they mentioned.
-- Calibrate difficulty using the candidate summary (experience level, skills).
-- One concise question only. Use finished true with nextQuestion null only when ending early or when the interview has run its course.`;
+- Must feel like a real hiring conversation for ${profession}: grounded in their CV/profile summary, transcript, and (when in the medium phase) current tools or newer practices where appropriate — not generic filler.
+- Build on the transcript: reference what they actually said; then probe appropriately for the phase below.
+- One concise question only. Use finished true with nextQuestion null only when ending early or when the interview has run its course.
+
+${continueNextQuestionPolicyBlock(profession, turn)}`;
 
       const transcript = messages
         .map((m) => `${m.role === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`)

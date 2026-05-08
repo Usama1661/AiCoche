@@ -1,6 +1,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { firstQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
   experienceLabel,
@@ -43,12 +44,7 @@ Target role / field: ${profession}
 Your task: produce ONLY valid JSON:
 {"question":"..."}
 
-Rules for the FIRST question:
-1. It must sound like a real interview question for THIS field (${profession}) — not a lecture and not therapy. Prefer what employers actually ask (technical depth, tradeoffs, shipping experience, collaboration, debugging, domain-specific scenarios) when it fits the profile.
-2. Match difficulty and tone to the candidate's experience level (${expDesc}) using the candidate context below.
-3. Prefer referencing something specific from the context (skills, tools, goal, headline, experience lines, or CV/quiz hints). If the profile is sparse, still ask a strong, typical question for ${profession}.
-4. ONE concise question only (no preamble in the string). Not multiple questions.
-5. Avoid generic filler every candidate gets unless the profile is empty — then one solid behavioral question tied to ${profession} is OK.
+${firstQuestionPolicyBlock(profession, expDesc)}
 
 Candidate context (use this):
 ---
@@ -58,7 +54,7 @@ ${contextBlock}
     const profileJson = JSON.stringify(stripInternalInterviewFields(profile)).slice(0, 14_000);
 
     let question =
-      `As someone targeting ${profession} roles (${expDesc}), describe one concrete piece of work or learning from the last year that proves you are ready for this field — what was the situation and what did you deliver?`;
+      `To start us off in plain terms — how did you get interested in ${profession}, and which part of your background (role, project, or skill from your profile) best shows where you want to go next?`;
 
     const raw = await chatCompletionJson(
       [

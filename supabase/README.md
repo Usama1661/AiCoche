@@ -28,7 +28,9 @@ supabase/
     save-quiz-result/
     create-subscription/
     start-interview/
+    start-interview-stream/
     continue-interview/
+    continue-interview-stream/
 ```
 
 ## Database Schema
@@ -350,7 +352,9 @@ supabase functions deploy generate-quiz
 supabase functions deploy save-quiz-result
 supabase functions deploy create-subscription
 supabase functions deploy start-interview
+supabase functions deploy start-interview-stream
 supabase functions deploy continue-interview
+supabase functions deploy continue-interview-stream
 ```
 
 Local development:

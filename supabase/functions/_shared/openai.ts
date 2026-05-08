@@ -39,10 +39,20 @@ export async function synthesizeSpeechMp3(text: string): Promise<Uint8Array | nu
 
 export async function chatCompletionJson(
   messages: ChatMsg[],
-  opts?: { temperature?: number }
+  opts?: { temperature?: number; maxOutputTokens?: number }
 ): Promise<string | null> {
   const key = Deno.env.get('OPENAI_API_KEY');
   if (!key) return null;
+
+  const body: Record<string, unknown> = {
+    model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4o-mini',
+    messages,
+    temperature: opts?.temperature ?? 0.35,
+    response_format: { type: 'json_object' },
+  };
+  if (opts?.maxOutputTokens != null) {
+    body.max_tokens = opts.maxOutputTokens;
+  }
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -50,12 +60,7 @@ export async function chatCompletionJson(
       Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4o-mini',
-      messages,
-      temperature: opts?.temperature ?? 0.35,
-      response_format: { type: 'json_object' },
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -68,4 +73,64 @@ export async function chatCompletionJson(
     choices?: { message?: { content?: string } }[];
   };
   return data.choices?.[0]?.message?.content ?? null;
+}
+
+/** Plain chat completion with `stream: true` — yields UTF-8 text deltas from the assistant. */
+export async function* chatCompletionTextStream(
+  messages: ChatMsg[],
+  opts?: { temperature?: number }
+): AsyncGenerator<string, void, unknown> {
+  const key = Deno.env.get('OPENAI_API_KEY');
+  if (!key) return;
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4o-mini',
+      messages,
+      temperature: opts?.temperature ?? 0.4,
+      stream: true,
+    }),
+  });
+
+  if (!res.ok || !res.body) {
+    const errText = await res.text();
+    console.error('OpenAI stream error', res.status, errText);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let carry = '';
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      carry += decoder.decode(value, { stream: true });
+      const lines = carry.split('\n');
+      carry = lines.pop() ?? '';
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') return;
+        try {
+          const j = JSON.parse(data) as {
+            choices?: { delta?: { content?: string | null } }[];
+          };
+          const c = j.choices?.[0]?.delta?.content;
+          if (typeof c === 'string' && c.length) yield c;
+        } catch {
+          /* ignore partial JSON lines */
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }

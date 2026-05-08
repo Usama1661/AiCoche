@@ -203,18 +203,30 @@ export async function speakSequentialHumanLike(
   const myGen = speakGen;
   flushSpeechPlayback();
 
+  /** Start fetching the next clip while the current one plays so the following question isn’t blocked on TTS RTT. */
+  let pendingFetch = supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
+    body: { text: cleaned[0] },
+  });
+
   for (let i = 0; i < cleaned.length; i += 1) {
     if (speakGen !== myGen) {
       onComplete?.();
       return;
     }
-    const { data, error } = await supabase.functions.invoke<{
-      audioBase64?: string;
-    }>('interview-tts', { body: { text: cleaned[i] } });
+    const { data, error } = await pendingFetch;
+    if (speakGen !== myGen) {
+      onComplete?.();
+      return;
+    }
     if (error || !data?.audioBase64) {
       await speakSequentialAsync(cleaned.slice(i), myGen, pauseBetweenMs);
       onComplete?.();
       return;
+    }
+    if (i + 1 < cleaned.length) {
+      pendingFetch = supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
+        body: { text: cleaned[i + 1] },
+      });
     }
     try {
       await playMp3Base64(data.audioBase64);
