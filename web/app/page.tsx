@@ -2440,92 +2440,155 @@ function ProjectDetailModal({
   onClose: () => void;
 }) {
   const userMessageCount = messages.filter((message) => message.role === 'user').length;
-  const inProgress = !completed && (started || userMessageCount > 0);
   const showStart = !completed && !started && userMessageCount === 0;
   const canMarkComplete = completed || started || userMessageCount > 0;
+  const projectChatListRef = useRef<HTMLDivElement | null>(null);
+  const [narrowLayout, setNarrowLayout] = useState(false);
+  const [mobileCoachTab, setMobileCoachTab] = useState<'details' | 'chat'>('chat');
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    function sync() {
+      setNarrowLayout(mq.matches);
+    }
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  useEffect(() => {
+    const el = projectChatListRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [messages, chatLoading]);
+
+  useEffect(() => {
+    if (narrowLayout && mobileCoachTab === 'chat') {
+      const t = window.setTimeout(() => {
+        projectChatListRef.current?.scrollTo({ top: projectChatListRef.current.scrollHeight, behavior: 'smooth' });
+      }, 80);
+      return () => window.clearTimeout(t);
+    }
+  }, [narrowLayout, mobileCoachTab]);
+
+  const showDetails = !narrowLayout || mobileCoachTab === 'details';
+  const showChat = !narrowLayout || mobileCoachTab === 'chat';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal project-modal stack" onClick={(event) => event.stopPropagation()}>
-        <div className="row between">
-          <div>
-            <span className="hero-kicker">Project Coach</span>
-            <h2 className="title" style={{ marginTop: 10 }}>{project.title}</h2>
-            <p className="body muted" style={{ marginTop: 8 }}>{project.summary}</p>
-          </div>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
-
-        <div className="project-modal-layout">
-          <div className="stack">
-            <section className="project-section">
-              <h3 className="subtitle">Why this fits you</h3>
-              <p className="body muted">{project.why}</p>
-            </section>
-            <ProjectBullets title="Core features" items={project.features} />
-            <ProjectBullets title="Suggested stack" items={project.stack} />
-            <ProjectBullets title="Portfolio tips" items={project.portfolioTips} />
-            <ProjectBullets title="Interview talking points" items={project.interviewTalkingPoints} />
-          </div>
-
-          <aside className="project-chat-panel">
-            <div>
-              <h3 className="subtitle">Ask about this project</h3>
-              <p className="caption muted" style={{ marginTop: 6 }}>Ask about scope, stack, README, GitHub, timeline, or interview explanation.</p>
-            </div>
-            <div className="project-chat-list">
-              {messages.map((message) => (
-                <div className={`project-chat-message ${message.role}`} key={message.id}>
-                  <span className="message-label">{message.role === 'assistant' ? 'AiCoche' : 'You'}</span>
-                  <ProjectChatContent content={message.content} />
+        <header className="project-modal-header">
+          {narrowLayout ? (
+            <>
+              <div className="row between project-modal-header-eyebrow">
+                <span className="hero-kicker project-modal-kicker">Project Coach</span>
+                <div className="project-modal-header-actions project-modal-header-actions--top">
+                  {showStart ? <Button onClick={onStart}>Start</Button> : null}
+                  <Button
+                    variant={completed ? 'secondary' : undefined}
+                    onClick={onComplete}
+                    disabled={completed || completeLoading || !canMarkComplete}>
+                    {completed ? 'Completed' : completeLoading ? 'Saving...' : 'Mark Complete'}
+                  </Button>
+                  <Button variant="ghost" onClick={onClose}>Close</Button>
                 </div>
-              ))}
-              {chatLoading ? (
-                <div className="project-chat-message assistant">
-                  <span className="message-label">AiCoche</span>
-                  <p className="body">Thinking through your profile and this project...</p>
-                </div>
-              ) : null}
+              </div>
+              <div className="project-modal-header-body">
+                <h2 className="title project-modal-title">{project.title}</h2>
+                <p className="body muted project-modal-summary">{project.summary}</p>
+              </div>
+              <div className="project-modal-tabs" role="tablist" aria-label="Project coach">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mobileCoachTab === 'details'}
+                  className={`project-modal-tab ${mobileCoachTab === 'details' ? 'active' : ''}`}
+                  onClick={() => setMobileCoachTab('details')}>
+                  Details
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mobileCoachTab === 'chat'}
+                  className={`project-modal-tab ${mobileCoachTab === 'chat' ? 'active' : ''}`}
+                  onClick={() => setMobileCoachTab('chat')}>
+                  Ask AI
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="row between project-modal-header-top">
+              <div className="project-modal-header-intro">
+                <span className="hero-kicker project-modal-kicker">Project Coach</span>
+                <h2 className="title project-modal-title">{project.title}</h2>
+                <p className="body muted project-modal-summary">{project.summary}</p>
+              </div>
+              <div className="project-modal-header-actions">
+                {showStart ? <Button onClick={onStart}>Start</Button> : null}
+                <Button
+                  variant={completed ? 'secondary' : undefined}
+                  onClick={onComplete}
+                  disabled={completed || completeLoading || !canMarkComplete}>
+                  {completed ? 'Completed' : completeLoading ? 'Saving...' : 'Mark Complete'}
+                </Button>
+                <Button variant="ghost" onClick={onClose}>Close</Button>
+              </div>
             </div>
-            <div className="project-chat-input">
-              <textarea
-                className="input"
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    onAsk();
-                  }
-                }}
-                placeholder="Ask: How should I build this?"
-              />
-              <Button onClick={onAsk} disabled={!question.trim() || chatLoading}>{chatLoading ? 'Wait...' : 'Ask'}</Button>
-            </div>
-          </aside>
-        </div>
+          )}
+        </header>
 
-        <footer className="project-modal-footer">
-          <div className="project-modal-footer-status">
-            <span className="caption muted">Status</span>
-            <span className={`mini-pill ${completed ? 'success' : inProgress ? 'warning' : ''}`}>
-              {completed ? 'Complete' : inProgress ? 'In progress' : 'Not started'}
-            </span>
-          </div>
-          <div className="project-modal-footer-actions">
-            {showStart ? (
-              <Button onClick={onStart}>
-                Start
-              </Button>
-            ) : null}
-            <Button
-              variant={completed ? 'secondary' : undefined}
-              onClick={onComplete}
-              disabled={completed || completeLoading || !canMarkComplete}>
-              {completed ? 'Completed' : completeLoading ? 'Saving...' : 'Mark Complete'}
-            </Button>
-          </div>
-        </footer>
+        <div className={`project-modal-layout ${narrowLayout ? 'project-modal-layout--narrow' : ''}`}>
+          {showDetails ? (
+            <div className="stack project-modal-details-col">
+              <section className="project-section">
+                <h3 className="subtitle">Why this fits you</h3>
+                <p className="body muted">{project.why}</p>
+              </section>
+              <ProjectBullets title="Core features" items={project.features} />
+              <ProjectBullets title="Suggested stack" items={project.stack} />
+              <ProjectBullets title="Portfolio tips" items={project.portfolioTips} />
+              <ProjectBullets title="Interview talking points" items={project.interviewTalkingPoints} />
+            </div>
+          ) : null}
+
+          {showChat ? (
+            <aside className="project-chat-panel">
+              <div className="project-chat-head">
+                <h3 className="subtitle project-chat-head-title">Ask about this project</h3>
+                <p className="caption muted project-chat-head-hint">Scope, stack, README, timeline, interview prep.</p>
+              </div>
+              <div className="project-chat-list" ref={projectChatListRef}>
+                {messages.map((message) => (
+                  <div className={`project-chat-message ${message.role}`} key={message.id}>
+                    <span className="message-label">{message.role === 'assistant' ? 'AiCoche' : 'You'}</span>
+                    <ProjectChatContent content={message.content} />
+                  </div>
+                ))}
+                {chatLoading ? (
+                  <div className="project-chat-message assistant">
+                    <span className="message-label">AiCoche</span>
+                    <p className="body">Thinking through your profile and this project...</p>
+                  </div>
+                ) : null}
+              </div>
+              <div className="project-chat-input project-chat-input--compact">
+                <textarea
+                  className="input project-chat-ask-field"
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      onAsk();
+                    }
+                  }}
+                  placeholder="Ask: How should I build this?"
+                />
+                <Button onClick={onAsk} disabled={!question.trim() || chatLoading}>{chatLoading ? 'Wait...' : 'Ask'}</Button>
+              </div>
+            </aside>
+          ) : null}
+        </div>
       </div>
     </div>
   );
