@@ -259,7 +259,19 @@ type DirectProfileTables = {
 
 /** Free plan: mock interview sessions allowed (not per reply). Each session runs up to 6 answers. */
 const FREE_CHAT_LIMIT = 3;
-const FREE_CV_LIMIT = 10;
+/** Free tier: one CV analysis (see upgrade modal Free column). */
+const FREE_CV_LIMIT = 1;
+
+/**
+ * Display-only suggested prices (USD / month). Tune after you model API + infra cost per active user.
+ * Annual = ~2 months free vs paying monthly × 12.
+ */
+const PLAN_SUGGESTED_USD = {
+  proMonthly: 18,
+  proAnnual: 179,
+  ultraMonthly: 42,
+  ultraAnnual: 399,
+} as const;
 const MOTIVATIONAL_QUOTES = [
   'Small steps compound into big career wins. Keep showing up today.',
   'Your next opportunity is built by the practice you do now.',
@@ -1024,6 +1036,7 @@ export default function WebApp() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [upgradeModalVariant, setUpgradeModalVariant] = useState<'interview' | 'cv' | null>(null);
   const remoteProfileLoadedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1132,6 +1145,7 @@ export default function WebApp() {
     setError,
     busy,
     setBusy,
+    openUpgradeModal: (variant: 'interview' | 'cv') => setUpgradeModalVariant(variant),
   };
 
   if (!hydrated) {
@@ -1140,6 +1154,14 @@ export default function WebApp() {
 
   return (
     <main className="app-shell" data-theme={theme}>
+      {upgradeModalVariant ? (
+        <UpgradePlanModal
+          variant={upgradeModalVariant}
+          usage={usage}
+          onClose={() => setUpgradeModalVariant(null)}
+          setView={setView}
+        />
+      ) : null}
       {error ? (
         <Toast message={error} onClose={() => setError('')} />
       ) : null}
@@ -1206,6 +1228,8 @@ type CommonProps = {
   setError: (message: string) => void;
   busy: boolean;
   setBusy: (busy: boolean) => void;
+  /** Opens the full-screen upgrade plan modal (interview vs CV copy). */
+  openUpgradeModal?: (variant: 'interview' | 'cv') => void;
 };
 
 function Loading({ theme }: { theme: Theme }) {
@@ -2648,13 +2672,41 @@ function ProjectChatContent({ content }: { content: string }) {
   );
 }
 
-function InterviewTab({ profile, metrics, usage, setUsage, reminders, setReminders, interviewSessions, setSelectedInterviewSessionId, setView }: CommonProps) {
+function InterviewTab({
+  profile,
+  metrics,
+  usage,
+  setUsage,
+  reminders,
+  setReminders,
+  interviewSessions,
+  setSelectedInterviewSessionId,
+  setView,
+  openUpgradeModal,
+}: CommonProps) {
   const now = Date.now();
   const reminderList = normalizeReminders(reminders);
   const upcoming = reminderList.filter((r) => new Date(r.scheduledAt).getTime() > now);
   const ready = reminderList.filter((r) => new Date(r.scheduledAt).getTime() <= now);
   const progress = Math.min(100, (usage.chatsUsed / FREE_CHAT_LIMIT) * 100);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const canStart = usage.plan === 'pro' || usage.chatsUsed < FREE_CHAT_LIMIT;
+
+  function tryStartTypedInterview() {
+    if (!canStart) {
+      openUpgradeModal?.('interview');
+      return;
+    }
+    setView('interview-session');
+  }
+
+  function tryStartVoiceInterview() {
+    if (!canStart) {
+      openUpgradeModal?.('interview');
+      return;
+    }
+    setView('voice-interview');
+  }
 
   function schedule(minutes: number) {
     setReminders((current) => [
@@ -2685,7 +2737,7 @@ function InterviewTab({ profile, metrics, usage, setUsage, reminders, setReminde
         <h1 className="display">Mock Interviews</h1>
         <p className="body muted">Practice with AI and improve your skills</p>
       </div>
-      <button className="hero-card row" onClick={() => setView('interview-session')} style={{ textAlign: 'left', cursor: 'pointer' }}>
+      <button className="hero-card row" onClick={tryStartTypedInterview} style={{ textAlign: 'left', cursor: 'pointer' }}>
         <div className="icon-box" style={{ color: 'white' }}>◌</div>
         <div>
           <h2 className="subtitle">Start New Interview</h2>
@@ -2695,7 +2747,7 @@ function InterviewTab({ profile, metrics, usage, setUsage, reminders, setReminde
       <button
         className="hero-card row"
         type="button"
-        onClick={() => setView('voice-interview')}
+        onClick={tryStartVoiceInterview}
         style={{ textAlign: 'left', cursor: 'pointer', borderStyle: 'dashed' }}>
         <div className="icon-box" style={{ color: 'white', background: 'color-mix(in srgb, var(--primary) 55%, var(--elevated))' }}>🎙</div>
         <div>
@@ -3321,7 +3373,19 @@ function CvUpload({ metrics, setMetrics, setView, setError, setBusy, busy }: Com
   );
 }
 
-function CvAnalysisScreen({ profile, setProfile, metrics, setMetrics, usage, setUsage, setView, setError, busy, setBusy }: CommonProps) {
+function CvAnalysisScreen({
+  profile,
+  setProfile,
+  metrics,
+  setMetrics,
+  usage,
+  setUsage,
+  setView,
+  setError,
+  busy,
+  setBusy,
+  openUpgradeModal,
+}: CommonProps) {
   const canAnalyze = usage.plan === 'pro' || usage.cvAnalysesUsed < FREE_CV_LIMIT;
   const [result, setResult] = useState<CvAnalysis | null>(metrics.lastAnalysis);
 
@@ -3331,7 +3395,7 @@ function CvAnalysisScreen({ profile, setProfile, metrics, setMetrics, usage, set
       return;
     }
     if (!canAnalyze) {
-      setError('CV analysis limit reached. Upgrade to Pro from Profile to continue.');
+      openUpgradeModal?.('cv');
       return;
     }
     setBusy(true);
@@ -3403,7 +3467,17 @@ function CvAnalysisScreen({ profile, setProfile, metrics, setMetrics, usage, set
   );
 }
 
-function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setInterviewSessions, setView, setError }: CommonProps) {
+function InterviewSession({
+  profile,
+  metrics,
+  setMetrics,
+  usage,
+  setUsage,
+  setInterviewSessions,
+  setView,
+  setError,
+  openUpgradeModal,
+}: CommonProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState('');
@@ -3446,7 +3520,7 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
     interviewStartedRef.current = true;
     async function start() {
       if (!canStart) {
-        setError('Free plan interview limit reached. Upgrade to Pro from Profile to continue.');
+        openUpgradeModal?.('interview');
         setView('interview');
         return;
       }
@@ -3803,6 +3877,7 @@ function VoiceInterviewSession({
   setInterviewSessions,
   setView,
   setError,
+  openUpgradeModal,
 }: CommonProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState('');
@@ -3916,7 +3991,7 @@ function VoiceInterviewSession({
     interviewStartedRef.current = true;
     async function start() {
       if (!canStart) {
-        setError('Free plan interview limit reached. Upgrade to Pro from Profile to continue.');
+        openUpgradeModal?.('interview');
         setView('interview');
         return;
       }
@@ -6155,6 +6230,175 @@ function WebHeader({
         </div>
       </div>
     </header>
+  );
+}
+
+const UPGRADE_PLAN_FEATURES = {
+  free: [
+    'One-time CV analysis',
+    '1 voice mock interview session',
+    '3 chat-based mock interview sessions',
+    '3 quizzes',
+    '3 project recommendations',
+    '10 AI chats for project help (total)',
+    'Edit CV & profile',
+  ],
+  pro: [
+    '5 CV analyses',
+    '10 AI voice mock interviews',
+    '10 chat-based mock interviews',
+    'More quizzes (higher cap)',
+    'Personal AI career coach',
+    'More project recommendations + up to 20 AI chats per project',
+    'Profile boost',
+    'Edit profile & download CV',
+  ],
+  ultra: [
+    'Unlimited CV analyses',
+    'Unlimited voice & chat mock interviews',
+    'Unlimited quizzes',
+    'Unlimited personal AI career coach',
+    'Unlimited project recommendations & AI help on projects',
+    'Fair-use policy applies to protect costs',
+  ],
+} as const;
+
+function UpgradePlanModal({
+  variant,
+  usage,
+  onClose,
+  setView,
+}: {
+  variant: 'interview' | 'cv';
+  usage: UsageState;
+  onClose: () => void;
+  setView: (view: View) => void;
+}) {
+  const isInterview = variant === 'interview';
+  const title = isInterview ? 'Choose a plan to keep practicing' : 'Choose a plan for more CV power';
+  const lead = isInterview
+    ? `You have used the free allowance for mock interviews. Compare Free, Pro, and Ultra below — billing and checkout live in Profile.`
+    : `You have used the free allowance for CV analysis. Compare Free, Pro, and Ultra below — billing and checkout live in Profile.`;
+
+  const freeCap = isInterview ? FREE_CHAT_LIMIT : FREE_CV_LIMIT;
+  const used = isInterview ? usage.chatsUsed : usage.cvAnalysesUsed;
+  const usedForBar = Math.min(used, freeCap);
+  const pct = freeCap > 0 ? Math.round((usedForBar / freeCap) * 100) : 0;
+  const overFree = used > freeCap;
+
+  function goProfile() {
+    setView('profile');
+    onClose();
+  }
+
+  return (
+    <div
+      className="modal-backdrop upgrade-plan-backdrop"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="upgrade-plan-title">
+      <div className="modal upgrade-plan-modal upgrade-plan-modal--tiers stack" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className="upgrade-plan-modal__close"
+          onClick={onClose}
+          aria-label="Close">
+          ×
+        </button>
+        <div className="upgrade-plan-modal__decor" aria-hidden />
+        <div className="upgrade-plan-modal__hero">
+          <span className="upgrade-plan-modal__badge">AiCoche plans</span>
+          <h2 id="upgrade-plan-title" className="upgrade-plan-modal__title">
+            {title}
+          </h2>
+          <p className="body muted upgrade-plan-modal__lead">{lead}</p>
+          <div className="upgrade-plan-meter">
+            <div className="upgrade-plan-meter__row caption muted">
+              <span>{isInterview ? 'Free mock sessions (app limit)' : 'Free CV analyses (app limit)'}</span>
+              <span>
+                <strong className="upgrade-plan-meter__nums">
+                  {usedForBar} / {freeCap}
+                </strong>{' '}
+                used
+              </span>
+            </div>
+            <div className="upgrade-plan-meter__track" role="presentation">
+              <div className="upgrade-plan-meter__fill" style={{ width: `${pct}%` }} />
+            </div>
+            {overFree ? (
+              <p className="caption upgrade-plan-meter__note">
+                Totals can exceed the free bar above — upgrade in Profile when you are ready for Pro or Ultra.
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="upgrade-plan-compare-wrap">
+          <div className="upgrade-plan-compare">
+            <div className="upgrade-plan-tier">
+              <h3 className="upgrade-plan-tier__name">Free</h3>
+              <p className="upgrade-plan-tier__price">
+                <span className="upgrade-plan-tier__amount">$0</span>
+                <span className="upgrade-plan-tier__period">forever</span>
+              </p>
+              <ul className="upgrade-plan-tier__list">
+                {UPGRADE_PLAN_FEATURES.free.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="upgrade-plan-tier upgrade-plan-tier--pro">
+              <span className="upgrade-plan-tier__ribbon">Popular</span>
+              <h3 className="upgrade-plan-tier__name">Pro</h3>
+              <p className="upgrade-plan-tier__price">
+                <span className="upgrade-plan-tier__amount">${PLAN_SUGGESTED_USD.proMonthly}</span>
+                <span className="upgrade-plan-tier__period">/mo</span>
+                <span className="upgrade-plan-tier__annual">
+                  or ${PLAN_SUGGESTED_USD.proAnnual}/yr
+                </span>
+              </p>
+              <ul className="upgrade-plan-tier__list upgrade-plan-tier__list--checks">
+                {UPGRADE_PLAN_FEATURES.pro.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="upgrade-plan-tier upgrade-plan-tier--ultra">
+              <span className="upgrade-plan-tier__ribbon upgrade-plan-tier__ribbon--ultra">Unlimited</span>
+              <h3 className="upgrade-plan-tier__name">Ultra</h3>
+              <p className="upgrade-plan-tier__price">
+                <span className="upgrade-plan-tier__amount">${PLAN_SUGGESTED_USD.ultraMonthly}</span>
+                <span className="upgrade-plan-tier__period">/mo</span>
+                <span className="upgrade-plan-tier__annual">
+                  or ${PLAN_SUGGESTED_USD.ultraAnnual}/yr
+                </span>
+              </p>
+              <ul className="upgrade-plan-tier__list upgrade-plan-tier__list--checks upgrade-plan-tier__list--ultra">
+                {UPGRADE_PLAN_FEATURES.ultra.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <p className="caption muted upgrade-plan-modal__hint">
+          Prices are <strong>suggested starting points</strong> in USD so you can cover API, hosting, and support —
+          replace with live Stripe prices in Profile when you go live. Ultra is unlimited within a reasonable fair-use
+          policy you define.
+        </p>
+
+        <div className="upgrade-plan-modal__actions">
+          <div className="upgrade-plan-modal__cta-wrap">
+            <Button onClick={goProfile}>View plans &amp; billing in Profile</Button>
+          </div>
+          <Button variant="ghost" onClick={onClose}>
+            Not now
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
