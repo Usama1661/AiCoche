@@ -4,7 +4,8 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 
 export type Plan = 'free' | 'pro';
 
-const FREE_CHAT_LIMIT = 10;
+/** Free plan: number of mock interview sessions (each session = up to 6 Q&A turns). Not per message. */
+const FREE_CHAT_LIMIT = 3;
 const FREE_CV_LIMIT = 1;
 
 type UsageState = {

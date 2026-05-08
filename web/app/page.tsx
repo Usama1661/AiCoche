@@ -58,6 +58,8 @@ type ProfileState = {
   projects: string[];
   activeRecommendedProjectIds: string[];
   completedRecommendedProjectIds: string[];
+  /** User clicked Start (or sent a chat message) for this recommendation batch */
+  startedRecommendedProjectIds: string[];
   professionalProfile: ProfessionalProfile;
 };
 
@@ -73,6 +75,10 @@ type MetricsState = {
   lastCvText: string;
   lastAnalysis: CvAnalysis | null;
 };
+
+function hasCvAnalysisMetrics(m: MetricsState): boolean {
+  return m.lastAnalysis != null || m.lastCvScore != null;
+}
 
 type UsageState = {
   plan: 'free' | 'pro';
@@ -187,6 +193,7 @@ type RemoteProfileRow = {
   projects?: unknown;
   activeRecommendedProjectIds?: unknown;
   completedRecommendedProjectIds?: unknown;
+  startedRecommendedProjectIds?: unknown;
   professionalProfile?: Partial<ProfessionalProfile> & {
     experiences?: unknown;
     education?: unknown;
@@ -239,7 +246,8 @@ type DirectProfileTables = {
   projects?: Array<Record<string, unknown>>;
 };
 
-const FREE_CHAT_LIMIT = 10;
+/** Free plan: mock interview sessions allowed (not per reply). Each session runs up to 6 answers. */
+const FREE_CHAT_LIMIT = 3;
 const FREE_CV_LIMIT = 10;
 const MOTIVATIONAL_QUOTES = [
   'Small steps compound into big career wins. Keep showing up today.',
@@ -305,6 +313,7 @@ const initialProfile: ProfileState = {
   projects: [],
   activeRecommendedProjectIds: [],
   completedRecommendedProjectIds: [],
+  startedRecommendedProjectIds: [],
   professionalProfile: emptyProfessionalProfile,
 };
 
@@ -372,6 +381,9 @@ function normalizeProfileState(profile: ProfileState): ProfileState {
       : [],
     completedRecommendedProjectIds: Array.isArray(profile.completedRecommendedProjectIds)
       ? profile.completedRecommendedProjectIds.map(text).filter(Boolean)
+      : [],
+    startedRecommendedProjectIds: Array.isArray(profile.startedRecommendedProjectIds)
+      ? profile.startedRecommendedProjectIds.map(text).filter(Boolean)
       : [],
     professionalProfile: {
       ...emptyProfessionalProfile,
@@ -713,6 +725,10 @@ function mergeRemoteProfile(remote: unknown, fallback: ProfileState): ProfileSta
     completedRecommendedProjectIds: compactList([
       ...stringList(data.completedRecommendedProjectIds),
       ...fallback.completedRecommendedProjectIds,
+    ]),
+    startedRecommendedProjectIds: compactList([
+      ...stringList(data.startedRecommendedProjectIds),
+      ...fallback.startedRecommendedProjectIds,
     ]),
     professionalProfile: {
       ...fallback.professionalProfile,
@@ -1072,6 +1088,7 @@ export default function WebApp() {
             usage={usage}
             setView={setView}
             onSignOut={signOut}
+            cvAnalyzed={hasCvAnalysisMetrics(metrics)}
           />
           {view === 'home' ? <Home {...common} /> : null}
           {view === 'interview' ? <InterviewTab {...common} /> : null}
@@ -1206,13 +1223,13 @@ function Auth({ mode, setUser, setProfile, setView, setBusy, setError, busy }: C
   return (
     <section className="screen narrow entry-shell">
       <div className="entry-card auth-card stack">
-        <div className="brand-mark" style={{ width: 76, height: 76, borderRadius: 24, margin: '0 auto' }}>A</div>
-        <div style={{ textAlign: 'center' }}>
-        <span className="hero-kicker" style={{ margin: '0 auto 12px' }}>
+        <div className="brand-mark auth-brand-mark">A</div>
+        <div className="auth-card-heading">
+        <span className="hero-kicker auth-kicker">
           {mode === 'login' ? 'Welcome back' : 'Start free'}
         </span>
-        <h1 className="display">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h1>
-        <p className="body muted" style={{ marginTop: 8 }}>
+        <h1 className="display auth-heading">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h1>
+        <p className="body muted auth-subtitle">
           {mode === 'login' ? 'Sign in to continue your career journey' : 'Start your career growth journey today'}
         </p>
       </div>
@@ -1220,9 +1237,9 @@ function Auth({ mode, setUser, setProfile, setView, setBusy, setError, busy }: C
       <Field label="Email" value={email} onChange={setEmail} placeholder="you@example.com" type="email" />
       <Field label="Password" value={password} onChange={setPassword} placeholder="Min. 6 characters" type="password" />
       <Button onClick={submit} disabled={!valid || busy}>{busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}</Button>
-      <div className="row" style={{ justifyContent: 'center' }}>
+      <div className="row auth-switch">
         <p className="body muted">{mode === 'login' ? "Don't have an account?" : 'Already have an account?'}</p>
-        <button className="button ghost" onClick={() => setView(mode === 'login' ? 'signup' : 'login')}>
+        <button type="button" className="button ghost auth-switch-link" onClick={() => setView(mode === 'login' ? 'signup' : 'login')}>
           {mode === 'login' ? 'Sign Up' : 'Sign In'}
         </button>
       </div>
@@ -1472,7 +1489,74 @@ function Onboarding({ user, profile, setProfile, setView, setError }: Pick<Commo
   );
 }
 
+function CvAnalysisGateIllustration() {
+  return (
+    <div className="cv-gate-illustration" aria-hidden="true">
+      <svg viewBox="0 0 320 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="cvGateBg" x1="40" y1="20" x2="280" y2="200" gradientUnits="userSpaceOnUse">
+            <stop stopColor="var(--primary)" stopOpacity="0.14" />
+            <stop offset="1" stopColor="var(--primary)" stopOpacity="0.03" />
+          </linearGradient>
+        </defs>
+        <rect x="16" y="16" width="288" height="188" rx="28" fill="url(#cvGateBg)" stroke="var(--border)" strokeWidth="1.5" />
+        <rect x="56" y="48" width="108" height="140" rx="12" fill="var(--surface)" stroke="var(--border)" strokeWidth="1.5" />
+        <rect x="72" y="72" width="76" height="8" rx="4" fill="color-mix(in srgb, var(--text) 20%, transparent)" />
+        <rect x="72" y="92" width="56" height="8" rx="4" fill="color-mix(in srgb, var(--text) 12%, transparent)" />
+        <rect x="72" y="112" width="88" height="8" rx="4" fill="color-mix(in srgb, var(--text) 12%, transparent)" />
+        <rect x="72" y="140" width="64" height="8" rx="4" fill="color-mix(in srgb, var(--text) 12%, transparent)" />
+        <circle cx="214" cy="108" r="36" stroke="var(--primary)" strokeWidth="6" fill="color-mix(in srgb, var(--primary) 10%, transparent)" />
+        <line x1="240" y1="134" x2="272" y2="168" stroke="var(--primary)" strokeWidth="8" strokeLinecap="round" />
+      </svg>
+    </div>
+  );
+}
+
+function CvAnalysisGateCard({ setView }: { setView: (view: View) => void }) {
+  return (
+    <div className="card stack cv-analysis-gate-card">
+      <CvAnalysisGateIllustration />
+      <h2 className="title" style={{ textAlign: 'center' }}>
+        CV analysis required
+      </h2>
+      <p className="body muted" style={{ textAlign: 'center', maxWidth: 440, margin: '0 auto' }}>
+        Upload a CV and open Analyze CV from the dashboard. One successful analysis unlocks the rest of your workspace.
+      </p>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 12, justifyContent: 'center' }}>
+        <Button onClick={() => setView('cv-upload')}>Upload CV</Button>
+        <Button variant="secondary" onClick={() => setView('cv-analysis')}>
+          Analyze CV
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CvAnalysisGateScreen({
+  setView,
+  title,
+  subtitle,
+}: {
+  setView: (view: View) => void;
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <section className="screen stack cv-analysis-gate-screen">
+      <div>
+        <h1 className="display">{title}</h1>
+        <p className="body muted">
+          {subtitle ??
+            'Run an AI review on your CV first. We use those insights to personalize interviews, quizzes, and project ideas.'}
+        </p>
+      </div>
+      <CvAnalysisGateCard setView={setView} />
+    </section>
+  );
+}
+
 function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, setError }: CommonProps) {
+  const hasCvAnalysis = hasCvAnalysisMetrics(metrics);
   const motivation = useMemo(() => {
     return MOTIVATIONAL_QUOTES[new Date().getDate() % MOTIVATIONAL_QUOTES.length];
   }, []);
@@ -1485,12 +1569,40 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
   const [projectSessionId, setProjectSessionId] = useState<string | null>(null);
   const [projectChats, setProjectChats] = useState<Record<string, ProjectChatMessage[]>>({});
   const [completedProjectIds, setCompletedProjectIds] = useState<string[]>(profile.completedRecommendedProjectIds);
+  const [startedProjectIds, setStartedProjectIds] = useState<string[]>(profile.startedRecommendedProjectIds);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectChatLoading, setProjectChatLoading] = useState(false);
   const [projectCompleteLoading, setProjectCompleteLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState<ProjectRecommendation | null>(null);
   const [projectMessages, setProjectMessages] = useState<ProjectChatMessage[]>([]);
   const [projectQuestion, setProjectQuestion] = useState('');
+  const [projectCoachRefreshToken, setProjectCoachRefreshToken] = useState(0);
+
+  const profileRef = useRef(profile);
+  const metricsRef = useRef(metrics);
+  const fallbackProjectRecommendationsRef = useRef(fallbackProjectRecommendations);
+  profileRef.current = profile;
+  metricsRef.current = metrics;
+  fallbackProjectRecommendationsRef.current = fallbackProjectRecommendations;
+
+  function markProjectStarted(projectId: string) {
+    if (completedProjectIds.includes(projectId)) return;
+    const activeProjectIds = projectRecommendations.length
+      ? projectRecommendations.map((p) => p.id)
+      : profile.activeRecommendedProjectIds;
+    if (!activeProjectIds.includes(projectId)) return;
+    const nextStarted = Array.from(new Set([...startedProjectIds, projectId])).filter((id) =>
+      activeProjectIds.includes(id)
+    );
+    if (sameStringSet(nextStarted, startedProjectIds)) return;
+    setStartedProjectIds(nextStarted);
+    const nextProfile = { ...profile, startedRecommendedProjectIds: nextStarted };
+    setProfile(nextProfile);
+    void saveProfileSnapshot(nextProfile, user).catch((error) => {
+      setError(error instanceof Error ? error.message : 'Could not save project progress.');
+    });
+  }
+
   useEffect(() => {
     const interval = window.setInterval(() => {
       setMotivationIndex((current) => (current + 1) % MOTIVATIONAL_QUOTES.length);
@@ -1499,47 +1611,149 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
   }, []);
 
   useEffect(() => {
-    let active = true;
-    setProjectRecommendations([]);
-    setProjectSessionId(null);
-    setProjectChats({});
     setCompletedProjectIds(profile.completedRecommendedProjectIds);
+    setStartedProjectIds(profile.startedRecommendedProjectIds);
+  }, [profile.completedRecommendedProjectIds, profile.startedRecommendedProjectIds]);
 
-    setProjectsLoading(true);
+  useEffect(() => {
+    if (!user?.id || projectRecommendations.length !== 3 || !projectSessionId) return;
+    writeProjectBatchCache(user.id, {
+      sessionId: projectSessionId,
+      recommendations: projectRecommendations,
+      projectChats,
+      activeProjectIds: projectRecommendations.map((p) => p.id),
+    });
+  }, [user?.id, projectSessionId, projectRecommendations, projectChats]);
+
+  useEffect(() => {
+    let active = true;
+    if (!hasCvAnalysisMetrics(metricsRef.current)) {
+      setProjectRecommendations([]);
+      setProjectSessionId(null);
+      setProjectChats({});
+      setProjectsLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+    const profileSnap = profileRef.current;
+    const metricsSnap = metricsRef.current;
+    const fallbackProjects = fallbackProjectRecommendationsRef.current;
+
     if (!hasSupabase || !supabase || !user) {
+      const cacheKey = 'aicoche-web-project-batch:offline';
+      const cached = typeof window !== 'undefined'
+        ? (() => {
+            try {
+              const raw = window.localStorage.getItem(cacheKey);
+              if (!raw) return null;
+              const parsed = JSON.parse(raw) as StoredProjectBatch;
+              if (
+                parsed?.sessionId &&
+                Array.isArray(parsed.recommendations) &&
+                parsed.recommendations.length === 3 &&
+                Array.isArray(parsed.activeProjectIds)
+              ) {
+                return parsed;
+              }
+            } catch {
+              /* ignore */
+            }
+            return null;
+          })()
+        : null;
+
+      const completedIds = profileSnap.completedRecommendedProjectIds;
+      if (
+        cached &&
+        !batchFullyComplete(cached.activeProjectIds, completedIds) &&
+        (!profileSnap.activeRecommendedProjectIds.length ||
+          sameStringSet(profileSnap.activeRecommendedProjectIds, cached.activeProjectIds))
+      ) {
+        window.setTimeout(() => {
+          if (!active) return;
+          setProjectRecommendations(cached.recommendations);
+          setProjectSessionId(cached.sessionId);
+          setProjectChats(cached.projectChats ?? {});
+          setProjectsLoading(false);
+          if (!sameStringSet(profileSnap.activeRecommendedProjectIds, cached.activeProjectIds)) {
+            setProfile((current) => ({ ...current, activeRecommendedProjectIds: cached.activeProjectIds }));
+          }
+        }, 0);
+        return () => {
+          active = false;
+        };
+      }
+
       window.setTimeout(() => {
         if (!active) return;
-        setProjectRecommendations(fallbackProjectRecommendations);
-        const fallbackIds = fallbackProjectRecommendations.map((project) => project.id);
-        if (!sameStringSet(fallbackIds, profile.activeRecommendedProjectIds)) {
+        setProjectRecommendations(fallbackProjects);
+        const fallbackIds = fallbackProjects.map((project) => project.id);
+        if (!sameStringSet(fallbackIds, profileSnap.activeRecommendedProjectIds)) {
           setProfile((current) => ({ ...current, activeRecommendedProjectIds: fallbackIds }));
         }
-        setCompletedProjectIds(profile.completedRecommendedProjectIds);
         setProjectsLoading(false);
+        const offlineBatch: StoredProjectBatch = {
+          sessionId: cached?.sessionId ?? 'offline-project-session',
+          recommendations: fallbackProjects,
+          projectChats: cached?.projectChats ?? {},
+          activeProjectIds: fallbackIds,
+        };
+        storageSet(cacheKey, offlineBatch);
       }, 450);
       return () => {
         active = false;
       };
     }
 
+    const userId = user.id;
+    const completedInProfile = profileSnap.completedRecommendedProjectIds;
+    const activeIdsFromProfile = profileSnap.activeRecommendedProjectIds;
+
+    const cachedBatch = readProjectBatchCache(userId);
+    if (
+      cachedBatch &&
+      !batchFullyComplete(cachedBatch.activeProjectIds, completedInProfile) &&
+      (!activeIdsFromProfile.length || sameStringSet(activeIdsFromProfile, cachedBatch.activeProjectIds))
+    ) {
+      setProjectRecommendations(cachedBatch.recommendations);
+      setProjectSessionId(cachedBatch.sessionId);
+      setProjectChats(cachedBatch.projectChats ?? {});
+      setProjectsLoading(false);
+      if (!sameStringSet(activeIdsFromProfile, cachedBatch.activeProjectIds)) {
+        setProfile((current) => ({
+          ...current,
+          activeRecommendedProjectIds: cachedBatch.activeProjectIds,
+        }));
+      }
+      return () => {
+        active = false;
+      };
+    }
+
+    setProjectsLoading(true);
+    setProjectRecommendations([]);
+    setProjectSessionId(null);
+    setProjectChats({});
+
     supabase.functions
       .invoke<ProjectCoachRecommendResponse>('project-coach', {
         body: {
           action: 'recommend',
-          profile: buildUserProfile(profile),
-          metrics: buildProjectMetricsSnapshot(metrics),
+          profile: buildUserProfile(profileSnap),
+          metrics: buildProjectMetricsSnapshot(metricsSnap),
         },
       })
       .then(async ({ data, error }) => {
         if (!active) return;
         if (error || data?.error) {
           console.warn('AI project recommendations failed; using local fallback.', error ?? data?.error);
-          setProjectRecommendations(fallbackProjectRecommendations);
-          const fallbackIds = fallbackProjectRecommendations.map((project) => project.id);
-          if (!sameStringSet(fallbackIds, profile.activeRecommendedProjectIds)) {
+          setProjectRecommendations(fallbackProjects);
+          const fallbackIds = fallbackProjects.map((project) => project.id);
+          if (!sameStringSet(fallbackIds, profileSnap.activeRecommendedProjectIds)) {
             setProfile((current) => ({ ...current, activeRecommendedProjectIds: fallbackIds }));
           }
-          setCompletedProjectIds(profile.completedRecommendedProjectIds);
+          setProjectsLoading(false);
           return;
         }
 
@@ -1551,7 +1765,7 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
           ? recommendationData.completedProjectIds
           : [];
         const returnedCompletedForBatch = mergeCompletedProjectIds(
-          profile.completedRecommendedProjectIds.filter((projectId) => returnedProjectIds.includes(projectId)),
+          profileSnap.completedRecommendedProjectIds.filter((projectId) => returnedProjectIds.includes(projectId)),
           returnedCompletedIds.filter((projectId) => returnedProjectIds.includes(projectId))
         );
         const returnedBatchComplete = returnedProjectIds.length >= 3 &&
@@ -1562,8 +1776,8 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
             body: {
               action: 'recommend',
               forceNew: true,
-              profile: buildUserProfile(profile),
-              metrics: buildProjectMetricsSnapshot(metrics),
+              profile: buildUserProfile(profileRef.current),
+              metrics: buildProjectMetricsSnapshot(metricsRef.current),
             },
           });
           if (
@@ -1590,17 +1804,26 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
             ? recommendationData.recommendations.map((project) => project.id)
             : [];
           const remoteCompletedIds = recommendationData.completedProjectIds.filter((projectId) => activeProjectIds.includes(projectId));
-          const localCompletedIds = profile.completedRecommendedProjectIds.filter((projectId) => activeProjectIds.includes(projectId));
+          const latestProfile = profileRef.current;
+          const localCompletedIds = latestProfile.completedRecommendedProjectIds.filter((projectId) =>
+            activeProjectIds.includes(projectId)
+          );
           const mergedIds = mergeCompletedProjectIds(localCompletedIds, remoteCompletedIds);
+          const mergedStartedIds = latestProfile.startedRecommendedProjectIds.filter((projectId) =>
+            activeProjectIds.includes(projectId)
+          );
           setCompletedProjectIds(mergedIds);
+          setStartedProjectIds(mergedStartedIds);
           if (
-            !sameStringSet(activeProjectIds, profile.activeRecommendedProjectIds) ||
-            !sameStringSet(mergedIds, profile.completedRecommendedProjectIds)
+            !sameStringSet(activeProjectIds, latestProfile.activeRecommendedProjectIds) ||
+            !sameStringSet(mergedIds, latestProfile.completedRecommendedProjectIds) ||
+            !sameStringSet(mergedStartedIds, latestProfile.startedRecommendedProjectIds)
           ) {
             const mergedProfile = {
-              ...profile,
+              ...latestProfile,
               activeRecommendedProjectIds: activeProjectIds,
               completedRecommendedProjectIds: mergedIds,
+              startedRecommendedProjectIds: mergedStartedIds,
             };
             setProfile(mergedProfile);
             void saveProfileSnapshot(mergedProfile, user).catch((saveError) => {
@@ -1612,12 +1835,11 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
       .catch((error) => {
         if (active) {
           console.warn('AI project recommendations failed; using local fallback.', error);
-          setProjectRecommendations(fallbackProjectRecommendations);
-          const fallbackIds = fallbackProjectRecommendations.map((project) => project.id);
-          if (!sameStringSet(fallbackIds, profile.activeRecommendedProjectIds)) {
+          setProjectRecommendations(fallbackProjects);
+          const fallbackIds = fallbackProjects.map((project) => project.id);
+          if (!sameStringSet(fallbackIds, profileSnap.activeRecommendedProjectIds)) {
             setProfile((current) => ({ ...current, activeRecommendedProjectIds: fallbackIds }));
           }
-          setCompletedProjectIds(profile.completedRecommendedProjectIds);
         }
       })
       .finally(() => {
@@ -1627,7 +1849,7 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
     return () => {
       active = false;
     };
-  }, [fallbackProjectRecommendations, metrics, profile, user]);
+  }, [user?.id, projectCoachRefreshToken, metrics.lastAnalysis, metrics.lastCvScore]);
 
   function openProject(project: ProjectRecommendation) {
     const savedMessages = projectChats[project.id];
@@ -1647,6 +1869,7 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
 
   async function askProjectQuestion() {
     if (!selectedProject || !projectQuestion.trim()) return;
+    markProjectStarted(selectedProject.id);
     const question = projectQuestion.trim();
     const userMessage: ProjectChatMessage = { id: id(), role: 'user', content: question, createdAt: new Date().toISOString() };
     setProjectMessages((current) => [...current, userMessage]);
@@ -1686,21 +1909,41 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
 
   async function completeSelectedProject() {
     if (!selectedProject) return;
+    const userAsked = projectMessages.some((message) => message.role === 'user');
+    const hasTrackedStart = startedProjectIds.includes(selectedProject.id);
+    if (!userAsked && !hasTrackedStart) return;
+
     const optimistic = Array.from(new Set([...completedProjectIds, selectedProject.id]));
     const activeProjectIds = projectRecommendations.length
       ? projectRecommendations.map((project) => project.id)
       : profile.activeRecommendedProjectIds;
     const activeCompletedIds = optimistic.filter((projectId) => activeProjectIds.includes(projectId));
+    const nextStarted = startedProjectIds
+      .filter((projectId) => projectId !== selectedProject.id)
+      .filter((projectId) => activeProjectIds.includes(projectId));
     setCompletedProjectIds(activeCompletedIds);
+    setStartedProjectIds(nextStarted);
     const nextProfile = {
       ...profile,
       activeRecommendedProjectIds: activeProjectIds,
       completedRecommendedProjectIds: activeCompletedIds,
+      startedRecommendedProjectIds: nextStarted,
     };
     setProfile(nextProfile);
     void saveProfileSnapshot(nextProfile, user).catch((error) => {
       setError(error instanceof Error ? error.message : 'Could not save completed project to profile.');
     });
+
+    const allBatchDone =
+      activeProjectIds.length >= 3 &&
+      activeProjectIds.every((projectId) => activeCompletedIds.includes(projectId));
+    if (allBatchDone) {
+      if (user?.id) clearProjectBatchCache(user.id);
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('aicoche-web-project-batch:offline');
+      }
+      setProjectCoachRefreshToken((token) => token + 1);
+    }
 
     if (!hasSupabase || !supabase || !projectSessionId) return;
 
@@ -1739,6 +1982,11 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
   const dashboardQuizScore = overallQuizScore(normalizedQuizScores(metrics));
   const recommendedProjectIds = projectRecommendations.map((project) => project.id);
   const activeBatchProjectIds = recommendedProjectIds.length > 0 ? recommendedProjectIds : profile.activeRecommendedProjectIds;
+  const batchProjectTotal = activeBatchProjectIds.length;
+  const batchCompletedCount = completedProjectIds.filter((projectId) =>
+    activeBatchProjectIds.includes(projectId)
+  ).length;
+  const batchRemaining = Math.max(0, batchProjectTotal - batchCompletedCount);
   const projectProofDone = activeBatchProjectIds.length >= 3 &&
     activeBatchProjectIds.every((projectId) => completedProjectIds.includes(projectId));
   const profileStrengthItems = [
@@ -1768,16 +2016,18 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
       const messages = projectChats[project.id] ?? [];
       const userMessages = messages.filter((message) => message.role === 'user');
       const completed = completedProjectIds.includes(project.id);
+      const started = startedProjectIds.includes(project.id) || userMessages.length > 0;
       const lastMessage = [...messages].reverse().find((message) => text(message.content));
       return {
         project,
         completed,
+        started,
         messages,
         userMessageCount: userMessages.length,
         lastMessage,
       };
     })
-    .filter((item) => item.completed || item.userMessageCount > 0);
+    .filter((item) => item.completed || item.started || item.userMessageCount > 0);
 
   return (
     <>
@@ -1798,7 +2048,13 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
           </p>
           <div className="dashboard-hero-actions">
             <Button onClick={() => setView('cv-upload')}>Upload CV</Button>
-            <Button variant="secondary" onClick={() => setView('interview-session')}>Start Interview</Button>
+            <Button
+              variant="secondary"
+              disabled={!hasCvAnalysis}
+              onClick={() => setView('interview-session')}
+              title={!hasCvAnalysis ? 'Analyze your CV first to unlock interviews.' : undefined}>
+              Start Interview
+            </Button>
             <button className="chip" onClick={() => setUsage((u) => ({ ...u, plan: u.plan === 'pro' ? 'free' : 'pro' }))}>
               {usage.plan === 'pro' ? 'Pro Workspace' : 'Free Workspace'}
             </button>
@@ -1860,10 +2116,43 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
           <div className="dashboard-action-grid">
             <Action title="Upload CV" subtitle="Update your resume" icon="⇧" onClick={() => setView('cv-upload')} />
             <Action title="Analyze CV" subtitle="AI-powered review" icon="▤" onClick={() => setView('cv-analysis')} />
-            <Action title="Start Interview" subtitle="Practice with AI" icon="◌" onClick={() => setView('interview-session')} />
-            <Action title="AI Quiz" subtitle="Check your level" icon="◇" onClick={() => setView('quiz')} />
+            <Action
+              title="Start Interview"
+              subtitle="Practice with AI"
+              icon="◌"
+              onClick={() => setView('interview-session')}
+              disabled={!hasCvAnalysis}
+            />
+            <Action title="AI Quiz" subtitle="Check your level" icon="◇" onClick={() => setView('quiz')} disabled={!hasCvAnalysis} />
           </div>
 
+          {!hasCvAnalysis ? (
+            <div className="project-recommendation-panel card stack cv-recommendations-locked">
+              <div className="row between dashboard-section-title">
+                <div>
+                  <span className="hero-kicker">Recommended Projects</span>
+                  <h2 className="title" style={{ marginTop: 10 }}>
+                    Unlock personalized projects
+                  </h2>
+                </div>
+              </div>
+              <div className="cv-recommendations-locked-body">
+                <CvAnalysisGateIllustration />
+                <h3 className="subtitle" style={{ textAlign: 'center' }}>
+                  Analyze your CV to see project ideas
+                </h3>
+                <p className="body muted" style={{ textAlign: 'center', maxWidth: 480, margin: '0 auto' }}>
+                  After your first AI review, we suggest three portfolio projects matched to your role, skills, and CV score.
+                </p>
+                <div className="row" style={{ flexWrap: 'wrap', gap: 12, justifyContent: 'center' }}>
+                  <Button onClick={() => setView('cv-upload')}>Upload CV</Button>
+                  <Button variant="secondary" onClick={() => setView('cv-analysis')}>
+                    Analyze CV
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div className="project-recommendation-panel card stack">
             <div className="row between dashboard-section-title">
               <div>
@@ -1871,7 +2160,11 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
                 <h2 className="title" style={{ marginTop: 10 }}>Build proof for your profile</h2>
               </div>
               <p className="body muted">
-                {projectsLoading ? 'AI is generating fresh project ideas...' : 'Personalized from your role, CV score, and skills.'}
+                {projectsLoading
+                  ? 'AI is generating fresh project ideas...'
+                  : batchProjectTotal > 0
+                    ? `${batchRemaining} of ${batchProjectTotal} projects remaining`
+                    : 'Personalized from your role, CV score, and skills.'}
               </p>
             </div>
             <div className="project-card-grid">
@@ -1890,8 +2183,19 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
               )) : projectRecommendations.map((project) => (
                 <button className={`project-card ${completedProjectIds.includes(project.id) ? 'completed' : ''}`} key={project.id} onClick={() => openProject(project)} type="button">
                   <div className="row between">
-                    <span className={`mini-pill ${completedProjectIds.includes(project.id) ? 'success' : ''}`}>
-                      {completedProjectIds.includes(project.id) ? 'Completed' : project.difficulty}
+                    <span
+                      className={`mini-pill ${
+                        completedProjectIds.includes(project.id)
+                          ? 'success'
+                          : startedProjectIds.includes(project.id)
+                            ? 'warning'
+                            : ''
+                      }`}>
+                      {completedProjectIds.includes(project.id)
+                        ? 'Completed'
+                        : startedProjectIds.includes(project.id)
+                          ? 'In progress'
+                          : project.difficulty}
                     </span>
                     <span className="caption muted">{project.timeline}</span>
                   </div>
@@ -1917,11 +2221,11 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
                   <p className="caption muted">Open any project to continue the saved chat.</p>
                 </div>
                 <div className="project-activity-list">
-                  {projectActivity.map(({ project, completed, messages, userMessageCount, lastMessage }) => (
+                  {projectActivity.map(({ project, completed, started, messages, userMessageCount, lastMessage }) => (
                     <button className="project-activity-card" key={`activity-${project.id}`} onClick={() => openProject(project)} type="button">
                       <div className="row between">
-                        <span className={`mini-pill ${completed ? 'success' : 'warning'}`}>
-                          {completed ? 'Completed' : 'In progress'}
+                        <span className={`mini-pill ${completed ? 'success' : started ? 'warning' : ''}`}>
+                          {completed ? 'Completed' : started ? 'In progress' : 'Not started'}
                         </span>
                         <span className="caption muted">{userMessageCount} {userMessageCount === 1 ? 'question' : 'questions'}</span>
                       </div>
@@ -1941,6 +2245,7 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
               </div>
             ) : null}
           </div>
+          )}
         </div>
 
         <aside className="dashboard-side stack">
@@ -1953,12 +2258,29 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
               </p>
             </div>
             <div className="coach-action-list">
-              {nextStepActions.map((step) => (
-                <button key={step.label} className="coach-action" onClick={step.action}>
-                  <span>{step.label}</span>
-                  <span aria-hidden="true">›</span>
-                </button>
-              ))}
+              {!hasCvAnalysis ? (
+                <>
+                  <button className="coach-action" onClick={() => setView('cv-analysis')}>
+                    <span>Analyze your CV to unlock interview, quiz, and projects</span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                  <button className="coach-action" onClick={() => setView('cv-upload')}>
+                    <span>Upload or replace your CV</span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                  <button className="coach-action" onClick={() => setView('professional-profile')}>
+                    <span>Build your professional profile</span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                </>
+              ) : (
+                nextStepActions.map((step) => (
+                  <button key={step.label} className="coach-action" onClick={step.action}>
+                    <span>{step.label}</span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                ))
+              )}
             </div>
           </div>
 
@@ -2004,14 +2326,15 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
     {selectedProject ? (
       <ProjectDetailModal
         project={selectedProject}
-        profile={profile}
         messages={projectMessages}
         question={projectQuestion}
         setQuestion={setProjectQuestion}
         onAsk={askProjectQuestion}
         chatLoading={projectChatLoading}
         completed={completedProjectIds.includes(selectedProject.id)}
+        started={startedProjectIds.includes(selectedProject.id)}
         completeLoading={projectCompleteLoading}
+        onStart={() => markProjectStarted(selectedProject.id)}
         onComplete={completeSelectedProject}
         onClose={() => setSelectedProject(null)}
       />
@@ -2022,30 +2345,35 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
 
 function ProjectDetailModal({
   project,
-  profile,
   messages,
   question,
   setQuestion,
   onAsk,
   chatLoading,
   completed,
+  started,
   completeLoading,
+  onStart,
   onComplete,
   onClose,
 }: {
   project: ProjectRecommendation;
-  profile: ProfileState;
   messages: ProjectChatMessage[];
   question: string;
   setQuestion: (value: string) => void;
   onAsk: () => void;
   chatLoading: boolean;
   completed: boolean;
+  started: boolean;
   completeLoading: boolean;
+  onStart: () => void;
   onComplete: () => void;
   onClose: () => void;
 }) {
-  const role = profile.professionLabel || profile.professionalProfile.currentDesignation || 'your target role';
+  const userMessageCount = messages.filter((message) => message.role === 'user').length;
+  const inProgress = !completed && (started || userMessageCount > 0);
+  const showStart = !completed && !started && userMessageCount === 0;
+  const canMarkComplete = completed || started || userMessageCount > 0;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -2056,12 +2384,7 @@ function ProjectDetailModal({
             <h2 className="title" style={{ marginTop: 10 }}>{project.title}</h2>
             <p className="body muted" style={{ marginTop: 8 }}>{project.summary}</p>
           </div>
-          <div className="row" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <Button variant={completed ? 'secondary' : undefined} onClick={onComplete} disabled={completed || completeLoading}>
-              {completed ? 'Completed' : completeLoading ? 'Saving...' : 'Mark Complete'}
-            </Button>
-            <Button variant="ghost" onClick={onClose}>Close</Button>
-          </div>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
 
         <div className="project-modal-layout">
@@ -2112,6 +2435,28 @@ function ProjectDetailModal({
             </div>
           </aside>
         </div>
+
+        <footer className="project-modal-footer">
+          <div className="project-modal-footer-status">
+            <span className="caption muted">Status</span>
+            <span className={`mini-pill ${completed ? 'success' : inProgress ? 'warning' : ''}`}>
+              {completed ? 'Complete' : inProgress ? 'In progress' : 'Not started'}
+            </span>
+          </div>
+          <div className="project-modal-footer-actions">
+            {showStart ? (
+              <Button onClick={onStart}>
+                Start
+              </Button>
+            ) : null}
+            <Button
+              variant={completed ? 'secondary' : undefined}
+              onClick={onComplete}
+              disabled={completed || completeLoading || !canMarkComplete}>
+              {completed ? 'Completed' : completeLoading ? 'Saving...' : 'Mark Complete'}
+            </Button>
+          </div>
+        </footer>
       </div>
     </div>
   );
@@ -2169,7 +2514,7 @@ function ProjectChatContent({ content }: { content: string }) {
   );
 }
 
-function InterviewTab({ profile, usage, setUsage, reminders, setReminders, interviewSessions, setSelectedInterviewSessionId, setView }: CommonProps) {
+function InterviewTab({ profile, metrics, usage, setUsage, reminders, setReminders, interviewSessions, setSelectedInterviewSessionId, setView }: CommonProps) {
   const now = Date.now();
   const reminderList = normalizeReminders(reminders);
   const upcoming = reminderList.filter((r) => new Date(r.scheduledAt).getTime() > now);
@@ -2188,6 +2533,16 @@ function InterviewTab({ profile, usage, setUsage, reminders, setReminders, inter
       ...normalizeReminders(current),
     ]);
     setScheduleOpen(false);
+  }
+
+  if (!hasCvAnalysisMetrics(metrics)) {
+    return (
+      <CvAnalysisGateScreen
+        setView={setView}
+        title="Mock Interviews"
+        subtitle="Complete an AI CV review first so we can tailor questions to your background and goals."
+      />
+    );
   }
 
   return (
@@ -2224,7 +2579,7 @@ function InterviewTab({ profile, usage, setUsage, reminders, setReminders, inter
         </div>
       ))}
       <div className="row between">
-        <p className="body muted">Interviews used this month</p>
+        <p className="body muted">Mock interview sessions (not each reply; up to 6 Q&amp;A per session)</p>
         <b>{usage.chatsUsed} / {FREE_CHAT_LIMIT}</b>
       </div>
       <div className="progress"><span style={{ width: `${progress}%` }} /></div>
@@ -2318,7 +2673,50 @@ function sameStringSet(left: string[], right: string[]) {
   return left.every((item) => rightSet.has(item));
 }
 
-function Quiz({ profile, metrics, setMetrics }: CommonProps) {
+/** All projects in the active batch are marked complete in profile */
+function batchFullyComplete(activeIds: string[], completedIds: string[]) {
+  return activeIds.length >= 3 && activeIds.every((id) => completedIds.includes(id));
+}
+
+type StoredProjectBatch = {
+  sessionId: string;
+  recommendations: ProjectRecommendation[];
+  projectChats: Record<string, ProjectChatMessage[]>;
+  activeProjectIds: string[];
+};
+
+function projectBatchStorageKey(userId: string) {
+  return `aicoche-web-project-batch:${userId}`;
+}
+
+function readProjectBatchCache(userId: string): StoredProjectBatch | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(projectBatchStorageKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredProjectBatch;
+    if (!parsed.sessionId || !Array.isArray(parsed.recommendations) || parsed.recommendations.length !== 3) {
+      return null;
+    }
+    if (!Array.isArray(parsed.activeProjectIds) || parsed.activeProjectIds.length !== 3) return null;
+    if (!sameStringSet(parsed.activeProjectIds, parsed.recommendations.map((p) => p.id))) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeProjectBatchCache(userId: string, batch: StoredProjectBatch) {
+  storageSet(projectBatchStorageKey(userId), batch);
+}
+
+function clearProjectBatchCache(userId: string) {
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(projectBatchStorageKey(userId));
+  }
+}
+
+function Quiz({ profile, metrics, setMetrics, setView }: CommonProps) {
   const fallbackQuestions = useMemo(() => buildQuiz(profile, 0), [profile]);
   const [questions, setQuestions] = useState<QuizQuestion[]>(fallbackQuestions);
   const [quizIndex, setQuizIndex] = useState(0);
@@ -2336,6 +2734,15 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
 
   useEffect(() => {
     let active = true;
+    if (!hasCvAnalysisMetrics(metrics)) {
+      setLoadingQuiz(false);
+      setQuestions([]);
+      setQuizSessionId(null);
+      setQuizNotice('');
+      return () => {
+        active = false;
+      };
+    }
     const fallback = buildQuiz(profile, quizIndex);
     setLoadingQuiz(true);
     setQuestions([]);
@@ -2398,7 +2805,7 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
     return () => {
       active = false;
     };
-  }, [profile, quizIndex, quizRefreshKey]);
+  }, [profile, quizIndex, quizRefreshKey, metrics.lastAnalysis, metrics.lastCvScore]);
 
   async function submit() {
     if (selectedIndex == null) return;
@@ -2448,6 +2855,17 @@ function Quiz({ profile, metrics, setMetrics }: CommonProps) {
   function nextQuiz() {
     if (quizIndex + 1 >= FREE_QUIZ_LIMIT) return;
     setQuizIndex((index) => index + 1);
+  }
+
+  const cvReady = hasCvAnalysisMetrics(metrics);
+  if (!cvReady) {
+    return (
+      <CvAnalysisGateScreen
+        setView={setView}
+        title="AI Quiz"
+        subtitle="Your quiz mixes profile and CV-aware questions. Analyze your CV once to unlock this tab."
+      />
+    );
   }
 
   if (result) {
@@ -2640,7 +3058,7 @@ function Profile({ user, profile, setProfile, usage, setUsage, setError, onSignO
       <div className="card row between">
         <div>
           <h2 className="subtitle">{usage.plan === 'pro' ? 'Pro Plan' : 'Free Plan'}</h2>
-          <p className="body muted">Limited to 10 interviews and 1 CV analysis</p>
+          <p className="body muted">Limited to 3 mock interviews (six questions each) and 1 CV analysis</p>
         </div>
         <Button onClick={() => setUsage((u) => ({ ...u, plan: 'pro' }))}>Upgrade to Pro</Button>
       </div>
@@ -2650,7 +3068,7 @@ function Profile({ user, profile, setProfile, usage, setUsage, setError, onSignO
       <h2 className="title">Usage</h2>
       <div className="card stack">
         <Info label="CV Analyses" value={`${usage.cvAnalysesUsed}/${FREE_CV_LIMIT}`} />
-        <Info label="Interviews" value={`${usage.chatsUsed}/${FREE_CHAT_LIMIT}`} />
+          <Info label="Mock interviews" value={`${usage.chatsUsed}/${FREE_CHAT_LIMIT} sessions`} />
       </div>
       {modal ? (
         <Modal title={`Add ${modal}`} onClose={() => setModal(null)}>
@@ -2845,9 +3263,19 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [typing, setTyping] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const interviewUsageCountedRef = useRef(false);
+  const interviewStartedRef = useRef(false);
+  const cvReady = hasCvAnalysisMetrics(metrics);
   const canStart = usage.plan === 'pro' || usage.chatsUsed < FREE_CHAT_LIMIT;
   const sessionTitle = `${profile.professionLabel || 'Career'} mock interview`;
+
+  function consumeInterviewCreditOnce() {
+    if (interviewUsageCountedRef.current) return;
+    interviewUsageCountedRef.current = true;
+    setUsage((u) => ({ ...u, chatsUsed: u.chatsUsed + 1 }));
+  }
 
   function saveSessionHistory(partial: Partial<InterviewHistoryItem> & { id: string; messages: Message[] }) {
     const now = new Date().toISOString();
@@ -2865,6 +3293,9 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
   }
 
   useEffect(() => {
+    if (!cvReady) return;
+    if (interviewStartedRef.current) return;
+    interviewStartedRef.current = true;
     async function start() {
       if (!canStart) {
         setError('Free plan interview limit reached. Upgrade to Pro from Profile to continue.');
@@ -2876,7 +3307,7 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
         let response: { sessionId: string; question: string };
         if (hasSupabase && supabase) {
           const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
-            body: { profile: buildUserProfile(profile) },
+            body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
           });
           if (error) throw error;
           response = normalizeStartInterviewResponse(data, profile);
@@ -2887,14 +3318,14 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
         const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: response.question }];
         setMessages(initialMessages);
         saveSessionHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
-        setUsage((u) => ({ ...u, chatsUsed: u.chatsUsed + 1 }));
+        consumeInterviewCreditOnce();
       } catch (e) {
         const fallback = mockStart(profile);
         setSessionId(fallback.sessionId);
         const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: fallback.question }];
         setMessages(initialMessages);
         saveSessionHistory({ id: fallback.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
-        setUsage((u) => ({ ...u, cvAnalysesUsed: u.cvAnalysesUsed, chatsUsed: u.chatsUsed + 1 }));
+        consumeInterviewCreditOnce();
         setError(e instanceof Error ? `Using offline interview mode: ${e.message}` : 'Using offline interview mode.');
       } finally {
         setTyping(false);
@@ -2902,7 +3333,7 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
     }
     void start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cvReady]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -2910,9 +3341,10 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
 
   async function send() {
     const answer = input.trim();
-    if (!answer || typing) return;
+    if (!answer || typing || sessionEnded) return;
     const userMessage: Message = { id: id(), role: 'user', content: answer };
     const answeredMessages = [...messages, userMessage];
+    const userAnswerCount = answeredMessages.filter((message) => message.role === 'user').length;
     setInput('');
     setMessages(answeredMessages);
     setTyping(true);
@@ -2923,10 +3355,13 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
           body: { sessionId, answer },
         });
         if (error) throw error;
-        response = normalizeContinueInterviewResponse(data, messages.length);
+        response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
       } else {
         await new Promise((r) => setTimeout(r, 600));
-        response = mockContinue(messages.length);
+        response = mockContinue(
+          userAnswerCount,
+          profile.professionLabel || profile.professionalProfile.currentDesignation || ''
+        );
       }
       setMetrics((m) => ({ ...m, lastInterviewScore: response.score }));
       const nextMessages: Message[] = [
@@ -2935,6 +3370,7 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
         ...(response.nextQuestion ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }] : [{ id: id(), role: 'assistant' as const, content: 'That completes this mock interview. Great work!' }]),
       ];
       const status = response.finished ? 'completed' : 'active';
+      if (response.finished) setSessionEnded(true);
       setMessages(nextMessages);
       saveSessionHistory({
         id: sessionId || id(),
@@ -2964,11 +3400,26 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
     }
   }
 
+  if (!cvReady) {
+    return (
+      <section className="screen stack interview-screen">
+        <div className="interview-topbar">
+          <Header title="Mock interview" onBack={() => setView('interview')} />
+        </div>
+        <CvAnalysisGateCard setView={setView} />
+      </section>
+    );
+  }
+
   return (
     <section className="screen interview-screen">
       <div className="interview-topbar">
         <Header title="Mock interview" onBack={() => setView('interview')} />
-        {usage.plan === 'free' ? <span className="mini-pill">Free chats {usage.chatsUsed} / {FREE_CHAT_LIMIT}</span> : null}
+        {usage.plan === 'free' ? (
+          <span className="mini-pill">
+            Free interviews {usage.chatsUsed} / {FREE_CHAT_LIMIT} (6 questions each)
+          </span>
+        ) : null}
       </div>
 
       <div className="interview-chat-card">
@@ -3009,8 +3460,9 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
             className="input chat-textarea"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your answer..."
+            placeholder={sessionEnded ? 'Session ended — go back to start a new interview.' : 'Type your answer...'}
             rows={1}
+            disabled={sessionEnded}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -3018,7 +3470,7 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
               }
             }}
           />
-          <Button onClick={send} disabled={!input.trim() || typing}>Send</Button>
+          <Button onClick={send} disabled={!input.trim() || typing || sessionEnded}>Send</Button>
           <button className="button ghost chat-end-button" onClick={() => setView('interview')}>End session</button>
         </div>
       </div>
@@ -3069,6 +3521,7 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
     if (!answer || typing || !canContinue) return;
     const userMessage: Message = { id: id(), role: 'user', content: answer };
     const answeredMessages = [...messages, userMessage];
+    const userAnswerCount = answeredMessages.filter((message) => message.role === 'user').length;
     setInput('');
     setMessages(answeredMessages);
     setTyping(true);
@@ -3079,10 +3532,13 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
           body: { sessionId: session.id, answer },
         });
         if (error) throw error;
-        response = normalizeContinueInterviewResponse(data, messages.length);
+        response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
       } else {
         await new Promise((resolve) => setTimeout(resolve, 600));
-        response = mockContinue(messages.length);
+        response = mockContinue(
+          userAnswerCount,
+          profile.professionLabel || profile.professionalProfile.currentDesignation || ''
+        );
       }
 
       setMetrics((current) => ({ ...current, lastInterviewScore: response.score }));
@@ -3471,23 +3927,43 @@ function qTypeLabel(type: QuizQuestion['type']) {
 }
 
 function mockStart(profile: ProfileState) {
+  const role = profile.professionLabel || profile.professionalProfile.currentDesignation || 'your target field';
+  const exp =
+    profile.experience === 'beginner'
+      ? 'If you are earlier in your journey'
+      : profile.experience === 'experienced'
+        ? 'Given your level of experience'
+        : 'For your next step';
   return {
     sessionId: `mock-session-${id()}`,
-    question: `Let's start with your background as a ${profile.professionLabel || 'professional'}. What are you most proud of in the last 12 months?`,
+    question: `${exp} in ${role}, what is one concrete project, problem, or outcome from the last year that best shows you can perform in this type of role?`,
   };
 }
 
-function mockContinue(count: number) {
+/** Offline mock: one opening question from mockStart, then 5 follow-ups = 6 candidate answers total. */
+function mockContinue(userAnswerCount: number, professionLabel: string) {
+  const field = professionLabel.trim() || 'this field';
+  if (userAnswerCount >= 6) {
+    return {
+      feedback:
+        'This six-question practice session is complete. Note one strength and one improvement for your next real interview.',
+      score: 9,
+      nextQuestion: null,
+      finished: true,
+    };
+  }
   const questions = [
-    'How do you approach learning a new tool or framework?',
-    'Tell me about a time you had conflicting priorities. How did you decide?',
-    'What kind of role are you targeting next, and why?',
+    `In ${field}, how do you validate quality before you ship or merge your work?`,
+    `Describe a tradeoff between speed and quality on a ${field} project. What did you prioritize and why?`,
+    `How do you collaborate with PMs, design, or other engineers on a typical ${field} delivery?`,
+    `What signals or metrics would you watch after releasing a meaningful ${field} change?`,
+    `Where do you want to grow next in ${field}, and what concrete step are you taking this month?`,
   ];
-  const index = Math.floor(count / 2);
+  const index = userAnswerCount - 1;
   const nextQuestion = questions[index] ?? null;
   return {
     feedback: 'Solid structure. Try adding one concrete metric or outcome next time to strengthen credibility.',
-    score: Math.min(7 + index, 10),
+    score: Math.min(5 + userAnswerCount, 10),
     nextQuestion,
     finished: nextQuestion === null,
   };
@@ -3512,9 +3988,12 @@ function normalizeStartInterviewResponse(value: unknown, profile: ProfileState) 
   };
 }
 
-function normalizeContinueInterviewResponse(value: unknown, messageCount: number) {
+function normalizeContinueInterviewResponse(value: unknown, userAnswerCount: number, profile: ProfileState) {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const fallback = mockContinue(messageCount);
+  const fallback = mockContinue(
+    userAnswerCount,
+    profile.professionLabel || profile.professionalProfile.currentDesignation || ''
+  );
   const rawScore = typeof data.score === 'number' ? data.score : fallback.score;
   const nextQuestion = typeof data.nextQuestion === 'string' && data.nextQuestion.trim()
     ? data.nextQuestion.trim()
@@ -3783,8 +4262,26 @@ function isTab(view: View): view is Tab {
   return view === 'home' || view === 'interview' || view === 'quiz' || view === 'profile' || view === 'settings';
 }
 
-function Button({ children, onClick, disabled, variant, style }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; variant?: 'secondary' | 'ghost' | 'danger'; style?: React.CSSProperties }) {
-  return <button className={`button ${variant ?? ''}`} onClick={onClick} disabled={disabled} style={style}>{children}</button>;
+function Button({
+  children,
+  onClick,
+  disabled,
+  variant,
+  style,
+  title,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  variant?: 'secondary' | 'ghost' | 'danger';
+  style?: React.CSSProperties;
+  title?: string;
+}) {
+  return (
+    <button className={`button ${variant ?? ''}`} type="button" onClick={onClick} disabled={disabled} style={style} title={title}>
+      {children}
+    </button>
+  );
 }
 
 function Field({ label, value, onChange, placeholder, type = 'text', multiline }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: string; multiline?: boolean }) {
@@ -3905,11 +4402,32 @@ function Score({ label, value, color, icon = '↗' }: { label: string; value: st
   );
 }
 
-function Action({ title, subtitle, icon, onClick }: { title: string; subtitle: string; icon: string; onClick: () => void }) {
+function Action({
+  title,
+  subtitle,
+  icon,
+  onClick,
+  disabled,
+}: {
+  title: string;
+  subtitle: string;
+  icon: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <button className="card stack dashboard-action-card" onClick={onClick}>
+    <button
+      type="button"
+      className={`card stack dashboard-action-card ${disabled ? 'is-locked' : ''}`}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      aria-disabled={disabled}
+      title={disabled ? 'Analyze your CV first to unlock this.' : undefined}>
       <div className="icon-box">{icon}</div>
-      <div><h3 className="subtitle">{title}</h3><p className="body muted">{subtitle}</p></div>
+      <div>
+        <h3 className="subtitle">{title}</h3>
+        <p className="body muted">{subtitle}</p>
+      </div>
     </button>
   );
 }
@@ -4476,6 +4994,7 @@ function WebHeader({
   setTheme,
   usage,
   onSignOut,
+  cvAnalyzed,
 }: {
   active: Tab | null;
   setView: (view: View) => void;
@@ -4483,6 +5002,7 @@ function WebHeader({
   setTheme: (theme: Theme) => void;
   usage: UsageState;
   onSignOut: () => void;
+  cvAnalyzed: boolean;
 }) {
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: 'home', label: 'Home', icon: '' },
@@ -4496,6 +5016,15 @@ function WebHeader({
   function navigate(view: View) {
     setView(view);
     setMenuOpen(false);
+  }
+
+  function navigateNav(tab: Tab) {
+    if (!cvAnalyzed && (tab === 'interview' || tab === 'quiz')) {
+      setView('cv-analysis');
+      setMenuOpen(false);
+      return;
+    }
+    navigate(tab);
   }
 
   return (
@@ -4518,11 +5047,20 @@ function WebHeader({
         </button>
 
         <nav className={`nav-links ${menuOpen ? 'open' : ''}`} aria-label="Primary navigation">
-          {tabs.map((tab) => (
-            <button key={tab.id} className={`nav-link ${active === tab.id ? 'active' : ''}`} onClick={() => navigate(tab.id)}>
-              {tab.label}
-            </button>
-          ))}
+          {tabs.map((tab) => {
+            const locked = !cvAnalyzed && (tab.id === 'interview' || tab.id === 'quiz');
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                className={`nav-link ${active === tab.id ? 'active' : ''} ${locked ? 'nav-link-locked' : ''}`}
+                onClick={() => navigateNav(tab.id)}
+                aria-disabled={locked}
+                title={locked ? 'Analyze your CV first to unlock Interview and AI Quiz.' : undefined}>
+                {tab.label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="header-actions">

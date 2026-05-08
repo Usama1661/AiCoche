@@ -161,7 +161,7 @@ export default function InterviewTabScreen() {
 
       <View style={styles.usageRow}>
         <AppText variant="body" muted style={styles.usageText}>
-          Interviews used this month
+          Free sessions (6 questions each, not per reply)
         </AppText>
         <AppText variant="body" style={styles.usageValue}>
           {chatsUsed} / {FREE_CHAT_LIMIT}

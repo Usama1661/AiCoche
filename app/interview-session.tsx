@@ -54,6 +54,7 @@ export default function InterviewSessionScreen() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [historyStatus, setHistoryStatus] = useState<'active' | 'completed' | 'abandoned' | null>(null);
   const listRef = useRef<FlatList>(null);
+  const interviewSessionCreditRef = useRef(false);
   const historySessionId = typeof params.sessionId === 'string' ? params.sessionId : null;
   const isHistoryMode = params.mode === 'history' && !!historySessionId;
   const canContinueHistory = isHistoryMode && plan === 'pro' && historyStatus === 'active';
@@ -89,8 +90,18 @@ export default function InterviewSessionScreen() {
     setError(null);
     try {
       const profile = buildUserProfileFromStores();
-      const res = await startInterview(profile);
-      incrementChat();
+      const m = useMetricsStore.getState();
+      const res = await startInterview(profile, {
+        lastCvScore: m.lastCvScore,
+        lastInterviewScore: m.lastInterviewScore,
+        lastQuizScore: m.lastQuizScore,
+        lastQuizLevel: m.lastQuizLevel,
+        lastAnalysis: m.lastAnalysis,
+      });
+      if (!interviewSessionCreditRef.current) {
+        interviewSessionCreditRef.current = true;
+        incrementChat();
+      }
       setSessionId(res.sessionId);
       setMessages([
         {
@@ -125,10 +136,14 @@ export default function InterviewSessionScreen() {
     setTyping(true);
 
     try {
-      const res = await continueInterview({ sessionId, answer: text });
+      const profile = buildUserProfileFromStores();
+      const res = await continueInterview({
+        sessionId,
+        answer: text,
+        professionLabel: profile.professionLabel ?? '',
+      });
       setTyping(false);
       setLastInterviewScore(res.score);
-      const profile = buildUserProfileFromStores();
       saveInterviewSessionScore({
         sessionId,
         title: profile.professionLabel
@@ -193,7 +208,7 @@ export default function InterviewSessionScreen() {
           </AppText>
         ) : plan === 'free' ? (
           <AppText variant="caption" muted style={{ marginBottom: spacing.sm }}>
-            Free plan: limited mock chats. Upgrade for unlimited practice.
+            Free: 3 mock interview sessions; each has 6 questions. Replies do not use extra sessions.
           </AppText>
         ) : null}
       </View>

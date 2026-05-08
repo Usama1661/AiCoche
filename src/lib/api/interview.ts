@@ -24,25 +24,47 @@ export type InterviewSessionDetail = InterviewSessionSummary & {
 
 function mockStart(profile: UserProfile): StartInterviewResponse {
   mockCounter = 0;
+  const role =
+    profile.professionLabel ||
+    profile.professionalProfile?.currentDesignation ||
+    'your target field';
+  const exp =
+    profile.experience === 'beginner'
+      ? 'If you are earlier in your journey'
+      : profile.experience === 'experienced'
+        ? 'Given your experience'
+        : 'For your next step';
   return {
     sessionId: 'mock-session',
-    question: `Let’s start with your background as a ${profile.professionLabel}. What are you most proud of in the last 12 months?`,
+    question: `${exp} in ${role}, what is one concrete project or outcome from the last year that shows you can perform in this type of role?`,
   };
 }
 
-function mockContinue(_answer: string): ContinueInterviewResponse {
+function mockContinue(_answer: string, professionLabel: string): ContinueInterviewResponse {
   mockCounter += 1;
+  const field = professionLabel.trim() || 'your field';
+  if (mockCounter >= 6) {
+    return {
+      feedback:
+        'This six-question practice session is complete. Note one strength and one improvement for your next interview.',
+      score: 9,
+      nextQuestion: null,
+      finished: true,
+    };
+  }
   const questions = [
-    'How do you approach learning a new tool or framework?',
-    'Tell me about a time you had conflicting priorities. How did you decide?',
-    'What kind of role are you targeting next, and why?',
+    `In ${field}, how do you validate quality before you ship or merge?`,
+    `Describe a tradeoff between speed and quality on a ${field} project. What did you prioritize?`,
+    `How do you collaborate with PMs, design, or other engineers on a ${field} delivery?`,
+    `What signals or metrics would you watch after a meaningful ${field} change?`,
+    `Where do you want to grow next in ${field}, and what step are you taking this month?`,
   ];
   const idx = mockCounter - 1;
-  const next = idx < questions.length ? questions[idx]! : null;
+  const next = questions[idx] ?? null;
   return {
     feedback:
       'Solid structure. Try adding one concrete metric or outcome next time to strengthen credibility.',
-    score: Math.min(6 + mockCounter, 10),
+    score: Math.min(5 + mockCounter, 10),
     nextQuestion: next,
     finished: next === null,
   };
@@ -66,7 +88,10 @@ async function functionErrorMessage(error: unknown): Promise<string> {
   return error instanceof Error ? error.message : 'Request failed.';
 }
 
-export async function startInterview(profile: UserProfile): Promise<StartInterviewResponse> {
+export async function startInterview(
+  profile: UserProfile,
+  metrics?: Record<string, unknown> | null
+): Promise<StartInterviewResponse> {
   if (!AUTHENTICATION_ENABLED) {
     await new Promise((r) => setTimeout(r, 700));
     return mockStart(profile);
@@ -80,9 +105,14 @@ export async function startInterview(profile: UserProfile): Promise<StartIntervi
     throw new Error('Supabase is not configured.');
   }
 
+  const body =
+    metrics && typeof metrics === 'object'
+      ? { profile, metrics }
+      : { profile };
+
   const { data, error } = await supabase.functions.invoke<StartInterviewResponse>(
     'start-interview',
-    { body: { profile } }
+    { body }
   );
   if (error) throw new Error(await functionErrorMessage(error));
   if (!data?.question) throw new Error('Invalid start-interview response');
@@ -92,23 +122,24 @@ export async function startInterview(profile: UserProfile): Promise<StartIntervi
 export async function continueInterview(params: {
   sessionId: string;
   answer: string;
+  professionLabel?: string;
 }): Promise<ContinueInterviewResponse> {
   if (!AUTHENTICATION_ENABLED) {
     await new Promise((r) => setTimeout(r, 800));
-    return mockContinue(params.answer);
+    return mockContinue(params.answer, params.professionLabel ?? '');
   }
 
   if (!hasSupabaseConfig()) {
     if (__DEV__) {
       await new Promise((r) => setTimeout(r, 800));
-      return mockContinue(params.answer);
+      return mockContinue(params.answer, params.professionLabel ?? '');
     }
     throw new Error('Supabase is not configured.');
   }
 
   const { data, error } = await supabase.functions.invoke<ContinueInterviewResponse>(
     'continue-interview',
-    { body: params }
+    { body: { sessionId: params.sessionId, answer: params.answer } }
   );
   if (error) throw new Error(await functionErrorMessage(error));
   if (!data) throw new Error('Invalid continue-interview response');

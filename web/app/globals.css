@@ -127,6 +127,11 @@ button {
   animation: pageEnter 520ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
+/* Login / signup: safe-area + entry-shell provide spacing; avoid doubling .screen padding */
+.screen.entry-shell {
+  padding: 0;
+}
+
 .narrow {
   width: min(540px, 100%);
 }
@@ -780,8 +785,20 @@ textarea.input {
 
 .entry-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
+  box-sizing: border-box;
+  padding:
+    max(16px, env(safe-area-inset-top, 0px))
+    max(18px, env(safe-area-inset-right, 0px))
+    max(20px, env(safe-area-inset-bottom, 0px))
+    max(18px, env(safe-area-inset-left, 0px));
+}
+
+.screen.narrow.entry-shell {
+  width: 100%;
+  max-width: 100%;
 }
 
 .entry-card {
@@ -816,7 +833,51 @@ textarea.input {
 
 .auth-card {
   width: min(520px, 100%);
+  max-width: 100%;
   margin: 0 auto;
+  min-width: 0;
+}
+
+.auth-brand-mark {
+  width: 76px;
+  height: 76px;
+  border-radius: 24px;
+  margin: 0 auto;
+}
+
+.auth-card-heading {
+  text-align: center;
+  min-width: 0;
+}
+
+.auth-kicker {
+  margin: 0 auto 12px;
+}
+
+.auth-heading {
+  font-size: clamp(26px, 6.5vw, 44px);
+  line-height: 1.05;
+  letter-spacing: -0.05em;
+}
+
+.auth-subtitle {
+  margin-top: 8px;
+}
+
+.auth-switch {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 4px;
+}
+
+.auth-switch .body {
+  margin: 0;
+  text-align: center;
+}
+
+.auth-switch-link {
+  flex-shrink: 0;
 }
 
 .auth-card .input-group,
@@ -1127,6 +1188,43 @@ textarea.input {
   font-size: 16px;
 }
 
+.dashboard-action-card.is-locked,
+.dashboard-action-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.nav-link.nav-link-locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cv-gate-illustration {
+  max-width: min(100%, 380px);
+  margin: 0 auto;
+}
+
+.cv-gate-illustration svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.cv-analysis-gate-card {
+  align-items: center;
+  gap: 16px;
+  padding: 28px 22px;
+}
+
+.cv-recommendations-locked-body {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  padding: 12px 0 8px;
+}
+
 .project-recommendation-panel {
   gap: 18px;
 }
@@ -1297,8 +1395,33 @@ textarea.input {
   height: calc(100dvh - 32px);
   max-height: calc(100dvh - 32px);
   overflow: hidden;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   padding: clamp(18px, 2.4vw, 28px);
+}
+
+.project-modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 14px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.project-modal-footer-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-modal-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .project-detail-grid {
@@ -2676,6 +2799,30 @@ textarea.input.chat-textarea {
 }
 
 @media (max-width: 640px) {
+  .entry-shell {
+    place-items: start center;
+    align-content: start;
+    padding:
+      max(12px, env(safe-area-inset-top, 0px))
+      max(12px, env(safe-area-inset-right, 0px))
+      max(16px, env(safe-area-inset-bottom, 0px))
+      max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .auth-heading {
+    font-size: clamp(24px, 8vw, 36px);
+  }
+
+  .auth-card > .button:not(.ghost) {
+    width: 100%;
+  }
+
+  .auth-switch {
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
   .site-header {
     top: 8px;
     width: min(100% - 18px, 1220px);
@@ -2684,6 +2831,14 @@ textarea.input.chat-textarea {
 
   .screen {
     padding: 24px 14px 48px;
+  }
+
+  .screen.entry-shell {
+    padding: 0;
+  }
+
+  .auth-card .input {
+    font-size: 16px;
   }
 
   .grid {
@@ -2758,7 +2913,18 @@ textarea.input.chat-textarea {
   }
 
   .entry-card {
-    padding: 28px 18px;
+    padding: 24px 16px;
+  }
+
+  .entry-card::before {
+    inset: 12px;
+    border-radius: 22px;
+  }
+
+  .auth-brand-mark {
+    width: 64px;
+    height: 64px;
+    border-radius: 20px;
   }
 
   .floating-orb {

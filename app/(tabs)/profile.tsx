@@ -228,7 +228,7 @@ export default function ProfileScreen() {
         <View style={{ flex: 1 }}>
           <AppText variant="subtitle">Free Plan</AppText>
           <AppText variant="body" muted style={{ fontWeight: '800' }}>
-            Limited to 10 interviews & 1 CV analysis
+            Limited to 3 mock interviews & 1 CV analysis
           </AppText>
         </View>
         <Button
@@ -263,7 +263,7 @@ export default function ProfileScreen() {
       </AppText>
       <View style={[styles.usageCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <UsageRow icon="document-text-outline" label="CV Analyses" value={`${cvAnalysesUsed}/${FREE_CV_LIMIT}`} />
-        <UsageRow icon="chatbubble-outline" label="Interviews" value={`${chatsUsed}/${FREE_CHAT_LIMIT}`} />
+        <UsageRow icon="chatbubble-outline" label="Mock interviews" value={`${chatsUsed}/${FREE_CHAT_LIMIT} sessions`} />
       </View>
 
       <Modal visible={modal != null} transparent animationType="fade">
