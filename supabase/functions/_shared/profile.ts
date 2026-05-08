@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 import type { CvAiAnalysis } from './ai.ts';
+import { isAcceptableSkillLabel } from './skillValidation.ts';
 
 function parseDate(value: string | undefined) {
   if (!value) return null;
@@ -19,7 +20,7 @@ function uniqSkills(skills: CvAiAnalysis['skills']) {
     const name = item.name.trim();
     const category = item.category || 'technical';
     const key = `${name.toLowerCase()}::${category}`;
-    if (!name || seen.has(key)) return false;
+    if (!name || !isAcceptableSkillLabel(name) || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
@@ -75,9 +76,16 @@ function appProfileSnapshot(existingProfile: Record<string, unknown> | null, ana
   const current = normalizedExperiences.find((item) => /present|current|now/i.test(item.endDate)) ?? normalizedExperiences[0];
   const technicalSkills = analysis.skills
     .filter((item) => item.category !== 'soft')
-    .map((item) => item.name);
-  const softSkills = analysis.skills.filter((item) => item.category === 'soft').map((item) => item.name);
-  const tools = analysis.skills.filter((item) => item.category === 'tool').map((item) => item.name);
+    .map((item) => item.name.trim())
+    .filter(isAcceptableSkillLabel);
+  const softSkills = analysis.skills
+    .filter((item) => item.category === 'soft')
+    .map((item) => item.name.trim())
+    .filter(isAcceptableSkillLabel);
+  const tools = analysis.skills
+    .filter((item) => item.category === 'tool')
+    .map((item) => item.name.trim())
+    .filter(isAcceptableSkillLabel);
 
   return {
     ...existingAi,
@@ -102,7 +110,7 @@ function appProfileSnapshot(existingProfile: Record<string, unknown> | null, ana
         startDate: item.startDate,
         endDate: item.endDate,
         responsibilities: uniq([...item.responsibilities, ...item.achievements]),
-        skills: uniq(item.skills),
+        skills: uniq(item.skills.filter(isAcceptableSkillLabel)),
       })),
       education: analysis.education.map((item, index) => ({
         id: `resume-education-${index + 1}`,
@@ -234,7 +242,7 @@ export async function saveAnalysisAndAutofill({
         is_current: /present|current|now/i.test(item.endDate),
         responsibilities: uniq(item.responsibilities),
         achievements: uniq(item.achievements),
-        skills_used: uniq(item.skills),
+        skills_used: uniq(item.skills.filter(isAcceptableSkillLabel)),
         source_cv_document_id: cvDocumentId,
       }))
     );

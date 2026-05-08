@@ -1722,13 +1722,23 @@ textarea.input {
   background: color-mix(in srgb, var(--surface) 82%, var(--primary-tint));
 }
 
+.experience-content > .row.between {
+  align-items: flex-start;
+}
+
+.experience-title-block {
+  flex: 1;
+  min-width: 0;
+}
+
 .experience-title {
   margin: 0;
   color: var(--text);
   font-size: 13px;
   line-height: 19px;
   font-weight: 900;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .experience-company,
@@ -1742,10 +1752,14 @@ textarea.input {
 
 .experience-date {
   flex: 0 0 auto;
+  flex-shrink: 0;
+  max-width: min(200px, 40vw);
+  text-align: right;
   padding: 5px 9px;
   border-radius: 999px;
   background: var(--primary-tint);
   color: var(--primary);
+  white-space: normal;
 }
 
 .experience-bullets {

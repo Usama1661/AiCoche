@@ -2,6 +2,7 @@
 
 import { createClient, type User } from '@supabase/supabase-js';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { isAcceptableSkillLabel } from '@/lib/skillValidation';
 
 type Theme = 'dark' | 'light';
 type Tab = 'home' | 'interview' | 'quiz' | 'profile' | 'settings';
@@ -557,16 +558,8 @@ function compactList(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function isCleanSkill(value: string) {
-  const skill = value.trim();
-  if (!skill || skill.length > 42) return false;
-  if (/recommendations?|name\s*:|mr\.?|mrs\.?|lecturer|supervisor|supervised|under my|working under|ceo|founder|final year|date of birth|phone|email|linkedin|github|website|portfolio|country|city|address/i.test(skill)) return false;
-  if (/[|:]/.test(skill)) return false;
-  return true;
-}
-
 function compactSkills(values: string[]) {
-  return compactList(values).filter(isCleanSkill);
+  return compactList(values).filter(isAcceptableSkillLabel);
 }
 
 function cleanSectionTitle(value: unknown) {
@@ -620,8 +613,60 @@ function formatDateRange(startValue: unknown, endValue: unknown, isCurrentValue?
   return end;
 }
 
+function normalizeExperienceJobTitle(raw: string): string {
+  let t = text(raw).replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  const dashSplit = t.search(/\s+[–—-]\s+[A-Za-z]/);
+  if (dashSplit > 24 && dashSplit < 160) {
+    t = t.slice(0, dashSplit).trim();
+  }
+  const open = t.indexOf('(');
+  if (open > 28 && open < 110 && t.length > 95) {
+    const before = t.slice(0, open).trim();
+    if (before.length >= 18) t = before;
+  }
+  if (t.length > 118) {
+    const slice = t.slice(0, 118);
+    const lastSpace = slice.lastIndexOf(' ');
+    t = `${lastSpace > 65 ? slice.slice(0, lastSpace) : slice}…`;
+  }
+  return t;
+}
+
+function skillsFromStructuredAnalysis(analysis: LatestCvAnalysisRow): {
+  technical: string[];
+  soft: string[];
+  tools: string[];
+  hasStructured: boolean;
+} {
+  const raw =
+    analysis.raw_ai_response && typeof analysis.raw_ai_response === 'object'
+      ? (analysis.raw_ai_response as Record<string, unknown>)
+      : null;
+  const rows = Array.isArray(raw?.skills)
+    ? (raw!.skills as unknown[])
+    : Array.isArray(analysis.skills)
+      ? (analysis.skills as unknown[])
+      : [];
+  const technical: string[] = [];
+  const soft: string[] = [];
+  const tools: string[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const record = row as Record<string, unknown>;
+    const name = text(record.name);
+    if (!isAcceptableSkillLabel(name)) continue;
+    const cat = text(record.category).toLowerCase();
+    if (cat === 'soft') soft.push(name);
+    else if (cat === 'tool' || cat === 'language') tools.push(name);
+    else technical.push(name);
+  }
+  const hasStructured = technical.length + soft.length + tools.length > 0;
+  return { technical, soft, tools, hasStructured };
+}
+
 function formatWorkExperience(row: Record<string, unknown>): string {
-  const title = text(row.job_title ?? row.title);
+  const title = normalizeExperienceJobTitle(text(row.job_title ?? row.title));
   const company = text(row.company_name ?? row.company);
   const dates = formatDateRange(row.start_date ?? row.startDate, row.end_date ?? row.endDate, row.is_current ?? row.isCurrent);
   const responsibilities = stringList(row.responsibilities).slice(0, 2).join('; ');
@@ -757,7 +802,11 @@ function mergeRemoteProfile(remote: unknown, fallback: ProfileState): ProfileSta
 function mergeLatestAnalysisProfile(profile: ProfileState, analysis: LatestCvAnalysisRow): ProfileState {
   const experiences = stringList(analysis.experiences);
   const education = formatEducationAnalysis(analysis.education);
-  const skills = stringList(analysis.skills);
+  const flatSkills = stringList(analysis.skills);
+  const structured = skillsFromStructuredAnalysis(analysis);
+  const skillUnion = structured.hasStructured
+    ? [...structured.technical, ...structured.soft, ...structured.tools]
+    : flatSkills;
   const certifications = stringList(analysis.certifications);
   const projects = stringList(analysis.projects);
   const extraSections = extractExtraSections(analysis.raw_ai_response);
@@ -768,7 +817,11 @@ function mergeLatestAnalysisProfile(profile: ProfileState, analysis: LatestCvAna
   return {
     ...profile,
     professionLabel: headline || profile.professionLabel,
-    skills: compactSkills([...skills, ...profile.skills]),
+    skills: compactSkills([...skillUnion, ...profile.skills]),
+    tools: compactSkills([
+      ...(structured.hasStructured ? structured.tools : []),
+      ...profile.tools,
+    ]),
     projects: compactList([...projects, ...profile.projects]),
     professionalProfile: {
       ...profile.professionalProfile,
@@ -778,7 +831,14 @@ function mergeLatestAnalysisProfile(profile: ProfileState, analysis: LatestCvAna
       headline,
       bio,
       currentDesignation: headline,
-      technicalSkills: compactSkills([...skills, ...profile.professionalProfile.technicalSkills]),
+      technicalSkills: compactSkills([
+        ...(structured.hasStructured ? structured.technical : flatSkills),
+        ...profile.professionalProfile.technicalSkills,
+      ]),
+      softSkills: compactSkills([
+        ...(structured.hasStructured ? structured.soft : []),
+        ...profile.professionalProfile.softSkills,
+      ]),
       experiences: uniqueExperiences([...experiences, ...profile.professionalProfile.experiences]),
       education: uniqueEducations([...education, ...profile.professionalProfile.education]),
       certifications: compactList([...certifications, ...profile.professionalProfile.certifications]),
@@ -4475,22 +4535,74 @@ function Empty({ message }: { message: string }) {
   return <div className="card"><p className="body muted">{message}</p></div>;
 }
 
+/** Only short segments that look like dates — never a responsibility paragraph that happens to mention a year. */
+function isPlausibleExperienceDateSegment(segment: string): boolean {
+  const s = segment.trim();
+  if (!s || s.length > 46) return false;
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length > 9) return false;
+  if (!/\d{4}|present|current|now/i.test(s)) return false;
+  // Narrative bullets (mentions patients, epidemics, duties, etc.) belong in details, not the date pill.
+  if (
+    /managed|presented|patients|physicians|attending|daily|updates|epidemic|pandemic|dengue|covid|responsible|duties|performed|assisted|conducted|selected|internship|inpatient|outreach|spearhead/i.test(
+      s
+    )
+  )
+    return false;
+  // Long prose with an embedded year (e.g. citation or sentence mentioning 2020)
+  if (s.length > 30 && words.length > 5) return false;
+  if (/[.;](?:\s|$)/.test(s) && words.length > 4) return false;
+
+  if (/^(?:present|current|now)$/i.test(s)) return true;
+  if (/^\d{4}$/.test(s)) return true;
+  if (
+    /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}(\s*[-–]\s*(?:present|current|now|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}|\d{4}))?$/i.test(
+      s
+    )
+  )
+    return true;
+  if (/^\d{4}\s*[-–]\s*(?:\d{4}|present|current|now)$/i.test(s)) return true;
+  if (/^\d{1,2}\/\d{4}\s*[-–]/i.test(s)) return true;
+  if (s.length <= 26 && /\d{4}\s*[-–]\s*(?:\d{4}|present)/i.test(s)) return true;
+  return false;
+}
+
 function parseExperienceDisplay(item: string) {
   const normalized = item.replace(/\s+/g, ' ').trim();
   const bulletParts = normalized.split(/\s+•\s+/).map((part) => part.trim()).filter(Boolean);
   const dashParts = normalized.split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean);
   const parts = bulletParts.length > 1 ? bulletParts : dashParts;
-  const [title = normalized, company = '', dates = '', ...details] = parts;
-  const normalizedDates = dates.replace(/\b(?:present|current|now)\b/gi, 'Present');
+  const title = parts[0] ?? normalized;
+  const company = parts[1] ?? '';
+  const rest = parts.slice(2);
+
+  let dates = '';
+  const detailChunks: string[] = [];
+  if (rest.length) {
+    const dateIndex = rest.findIndex((segment) => isPlausibleExperienceDateSegment(segment));
+    if (dateIndex >= 0) {
+      dates = rest[dateIndex].replace(/\b(?:present|current|now)\b/gi, 'Present');
+      rest.forEach((segment, index) => {
+        if (index !== dateIndex) detailChunks.push(segment);
+      });
+    } else {
+      detailChunks.push(...rest);
+    }
+  }
+
+  const details = detailChunks.join(' ').trim();
 
   return {
     raw: normalized,
     title,
     company,
-    dates: /\d{4}|present|current|now/i.test(dates) ? normalizedDates : '',
-    details: details.length ? details.join(' ') : (dates && !/\d{4}|present|current|now/i.test(dates) ? dates : ''),
+    dates,
+    details,
     key: `${title.toLowerCase()}::${company.toLowerCase()}`,
-    isDetailed: parts.length >= 4 || /developed|implemented|improved|performed|managed|built|created|automated|responsible/i.test(normalized),
+    isDetailed:
+      parts.length >= 4 ||
+      Boolean(details) ||
+      /developed|implemented|improved|performed|managed|built|created|automated|responsible/i.test(normalized),
   };
 }
 
@@ -4536,8 +4648,8 @@ function WorkExperienceList({ items }: { items: string[] }) {
           <div className="experience-dot" />
           <div className="experience-content">
             <div className="row between" style={{ alignItems: 'flex-start', gap: 12 }}>
-              <div>
-                <h3 className="experience-title">{item.title}</h3>
+              <div className="experience-title-block">
+                <h3 className="experience-title">{normalizeExperienceJobTitle(item.title)}</h3>
                 {item.company ? <p className="experience-company">{item.company}</p> : null}
               </div>
               {item.dates ? <span className="experience-date">{displayExperienceDates(item.dates, index === 0 && !hasPresentRole)}</span> : null}

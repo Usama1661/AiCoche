@@ -1,4 +1,5 @@
 import { chatCompletionJson } from './openai.ts';
+import { isAcceptableSkillLabel } from './skillValidation.ts';
 
 export type CvAiAnalysis = {
   fullName: string;
@@ -88,7 +89,10 @@ function repairExtractedTextArtifacts(value: string) {
 
 function prepareCvText(text: string) {
   return repairExtractedTextArtifacts(text)
-    .replace(/\s+(Summary|Professional Summary|Experience|Work Experience|Skills|Websites\s*&\s*Profiles|Education|Languages)\s+/gi, '\n$1\n')
+    .replace(
+      /\s+(Summary|Professional Summary|Experience|Work Experience|Skills|Clinical Skills|Technical Skills|Soft Skills|Licenses|Certifications|Publications|Awards|Volunteer|Research|Rotations|Websites\s*&\s*Profiles|Education|Languages)\s+/gi,
+      '\n$1\n'
+    )
     .replace(/\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\s*(?:[–-]\s*)?(?:Present|Current|Now|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}))\s+/gi, '\n$1\n')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
@@ -164,22 +168,12 @@ function isContactLine(value: string) {
   );
 }
 
-function isLikelySkill(value: string) {
-  const line = value.trim();
-  if (!line || line.length > 45) return false;
-  if (/^\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(line)) return false;
-  if (/education|university|college|bachelor|master|degree|location|email|phone/i.test(line)) return false;
-  if (/recommendations?|name\s*:|mr\.?|mrs\.?|lecturer|supervisor|supervised|under my|working under|ceo|founder|final year|linkedin|github|website|portfolio|country|city|address/i.test(line)) return false;
-  if (/[|:]/.test(line)) return false;
-  if (/islamabad|rawalpindi|lahore|karachi|pakistan/i.test(line)) return false;
-  if (/developer|engineer|designer|manager|analyst|company|pvt|ltd|software house/i.test(line)) return false;
-  if (/^[-•]/.test(line) || /\.$/.test(line)) return false;
-  return /[a-z]/i.test(line);
-}
-
 function isRoleLine(value: string) {
   return (
-    /developer|engineer|designer|manager|analyst|consultant|specialist/i.test(value) &&
+    (/developer|engineer|designer|manager|analyst|consultant|specialist|physician|surgeon|resident|fellow|nurse|rn\b|np\b|pa-c|technologist|extern|observer|intern|volunteer|coordinator|assistant|technician|cardiolog|oncolog|pediatr|anesthesiolog|structural heart|clinical\b/i.test(
+      value
+    ) ||
+      /\b(md|do|rn|bsn|mba)\b/i.test(value)) &&
     !/with\s+\d+\s+years|professional summary|summary|skills|websites|profiles|education|languages/i.test(value)
   );
 }
@@ -292,20 +286,25 @@ function parseEducation(educationText: string): CvAiAnalysis['education'] {
 
 function extractAdditionalSections(cvText: string) {
   const prepared = normalizeCvTextOrder(cvText);
-  const headingPattern = /^(professional summary|summary|work experience|experience|education|skills|projects|certifications|recommendations|academic experience|languages|websites\s*&\s*profiles)$/gim;
+  const headingPattern =
+    /^(professional summary|summary|work experience|experience|education|skills|clinical skills|technical skills|soft skills|projects|certifications|licenses|publications|awards|honors|volunteer|research|rotations|recommendations|academic experience|languages|websites\s*&\s*profiles|professional memberships)$/gim;
   const headings = Array.from(prepared.matchAll(headingPattern)).map((match) => ({
     title: match[1],
     index: match.index ?? 0,
     end: (match.index ?? 0) + match[0].length,
   }));
-  const known = /^(professional summary|summary|work experience|experience|education|skills|projects|certifications)$/i;
+  const known =
+    /^(professional summary|summary|work experience|experience|education|skills|projects|certifications|clinical skills|technical skills|soft skills)$/i;
   return headings
     .map((heading, index) => {
       const next = headings[index + 1]?.index ?? prepared.length;
       const body = prepared.slice(heading.end, next);
       return {
         title: heading.title.replace(/\b\w/g, (letter) => letter.toUpperCase()),
-        items: lines(body).filter((line) => !isContactLine(line)).slice(0, 12),
+        items: lines(body)
+          .filter((line) => !isContactLine(line))
+          .filter((line) => !/^page\s*\d+/i.test(line))
+          .slice(0, 16),
       };
     })
     .filter((section) => !known.test(section.title) && section.items.length);
@@ -330,10 +329,24 @@ function extractRecommendationSections(cvText: string) {
 function isValidExperience(item: CvAiAnalysis['experiences'][number]) {
   return (
     Boolean(item.title.trim()) &&
-    item.title.length < 80 &&
+    item.title.length < 140 &&
     !/professional summary|with\s+\d+\s+years/i.test(item.title) &&
     !/^company$/i.test(item.company)
   );
+}
+
+/** Strip narrative bullets mistakenly placed in date fields by the model. */
+function sanitizeExperienceDateField(raw: string): string {
+  const s = raw.trim();
+  if (!s || s.length > 44) return '';
+  if (
+    /managed|presented|patients|physicians|attending|epidemic|pandemic|dengue|covid|daily\s+updates|responsibilit|;\s*presented/i.test(
+      s
+    )
+  )
+    return '';
+  if (/[.;]\s+[A-Z]/.test(s) && s.length > 22) return '';
+  return s;
 }
 
 function normalizeExperienceFields(item: CvAiAnalysis['experiences'][number]) {
@@ -341,12 +354,24 @@ function normalizeExperienceFields(item: CvAiAnalysis['experiences'][number]) {
   const range = combined.match(dateRangePattern);
   const companyLooksLikeEndDate = /^(present|current|now)$/i.test(item.company.trim());
 
+  const rawStart = item.startDate.trim();
+  const rawEnd = item.endDate.trim();
+  const cleanStart = sanitizeExperienceDateField(rawStart);
+  const cleanEnd = sanitizeExperienceDateField(rawEnd);
+
+  const rescued: string[] = [];
+  if (rawStart.length > 44) rescued.push(rawStart);
+  else if (rawStart.length > 22 && !cleanStart) rescued.push(rawStart);
+  if (rawEnd.length > 44) rescued.push(rawEnd);
+  else if (rawEnd.length > 22 && !cleanEnd) rescued.push(rawEnd);
+
   return {
     ...item,
     title: removeDateRange(item.title).replace(/\s+/g, ' ').trim() || item.title,
     company: companyLooksLikeEndDate ? '' : removeDateRange(item.company).replace(/\s+/g, ' ').trim(),
-    startDate: item.startDate || range?.[1] || '',
-    endDate: item.endDate || range?.[2] || (companyLooksLikeEndDate ? item.company : ''),
+    startDate: cleanStart || range?.[1] || '',
+    endDate: cleanEnd || range?.[2] || (companyLooksLikeEndDate ? item.company : ''),
+    responsibilities: rescued.length ? [...rescued, ...item.responsibilities] : item.responsibilities,
   };
 }
 
@@ -388,7 +413,7 @@ function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysi
   const skillNames = sectionBetween(cvText, /^skills$/im, [/^projects$/im, /^websites\s*&\s*profiles$/im, /^education$/im, /^languages$/im])
     .split(/[,;\n]/)
     .map((item) => item.trim())
-    .filter(isLikelySkill);
+    .filter(isAcceptableSkillLabel);
   const projectLines = lines(sectionBetween(cvText, /projects/i, [/certifications/i]));
   const experiences = parseWorkExperiences(workText, skillNames);
 
@@ -438,6 +463,26 @@ function parseFallbackAnalysis(cvText: string, targetRole?: string): CvAiAnalysi
   };
 }
 
+function dedupeSkills(skills: CvAiAnalysis['skills']): CvAiAnalysis['skills'] {
+  const seen = new Set<string>();
+  return skills.filter((item) => {
+    const key = `${item.name.trim().toLowerCase()}::${item.category}`;
+    if (!item.name.trim() || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Prefer AI-extracted skills when the model returned enough clean entries; fallback regex often adds PDF noise. */
+function mergeSkillsPreferAi(ai: CvAiAnalysis['skills'], parsed: CvAiAnalysis['skills']): CvAiAnalysis['skills'] {
+  const aiOk = dedupeSkills(ai.filter((item) => isAcceptableSkillLabel(item.name)));
+  if (aiOk.length >= 4) return aiOk;
+  const parsedOk = dedupeSkills(parsed.filter((item) => isAcceptableSkillLabel(item.name)));
+  const merged = dedupeSkills([...aiOk, ...parsedOk]);
+  if (merged.length) return merged;
+  return aiOk.length ? aiOk : parsedOk;
+}
+
 function mergeWithSectionParse(ai: CvAiAnalysis, parsed: CvAiAnalysis): CvAiAnalysis {
   const aiName = cleanName(ai.fullName);
   const parsedName = cleanName(parsed.fullName);
@@ -460,9 +505,29 @@ function mergeWithSectionParse(ai: CvAiAnalysis, parsed: CvAiAnalysis): CvAiAnal
     summary,
     experiences,
     education: parsed.education.length ? parsed.education : ai.education,
-    skills: parsed.skills.length ? parsed.skills : ai.skills,
-    additionalSections: [...parsed.additionalSections, ...ai.additionalSections],
+    skills: mergeSkillsPreferAi(ai.skills, parsed.skills),
+    additionalSections: dedupeAdditionalSections([...parsed.additionalSections, ...ai.additionalSections]),
   };
+}
+
+function dedupeAdditionalSections(sections: CvAiAnalysis['additionalSections']) {
+  const map = new Map<string, { title: string; items: string[] }>();
+  for (const section of sections) {
+    const title = section.title.trim();
+    if (!title) continue;
+    const key = title.toLowerCase();
+    const prev = map.get(key);
+    const items = [...(prev?.items ?? []), ...section.items.map((item) => item.trim()).filter(Boolean)];
+    const seen = new Set<string>();
+    const uniqueItems = items.filter((item) => {
+      const k = item.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    map.set(key, { title, items: uniqueItems.slice(0, 24) });
+  }
+  return Array.from(map.values()).filter((section) => section.items.length);
 }
 
 function asArray<T>(value: unknown): T[] {
@@ -492,7 +557,7 @@ export function normalizeCvAnalysis(value: Record<string, unknown>): CvAiAnalysi
       category: asSkillCategory(item.category),
       proficiency: asString(item.proficiency),
     }))
-    .filter((item) => isLikelySkill(item.name));
+    .filter((item) => isAcceptableSkillLabel(item.name));
 
   const experiences = asArray<Record<string, unknown>>(value.experiences)
     .map((item) =>
@@ -503,7 +568,7 @@ export function normalizeCvAnalysis(value: Record<string, unknown>): CvAiAnalysi
         endDate: asString(item.endDate),
         responsibilities: asArray<string>(item.responsibilities).map(asString).filter(Boolean),
         achievements: asArray<string>(item.achievements).map(asString).filter(Boolean),
-        skills: asArray<string>(item.skills).map(asString).filter(Boolean),
+        skills: asArray<string>(item.skills).map(asString).filter(isAcceptableSkillLabel),
       })
     )
     .filter(isValidExperience);
@@ -525,7 +590,7 @@ export function normalizeCvAnalysis(value: Record<string, unknown>): CvAiAnalysi
     strengths: asArray<string>(value.strengths).map(asString).filter(Boolean),
     weaknesses: asArray<string>(value.weaknesses).map(asString).filter(Boolean),
     improvementSuggestions: asArray<string>(value.improvementSuggestions).map(asString).filter(Boolean),
-    recommendedSkills: asArray<string>(value.recommendedSkills).map(asString).filter(Boolean),
+    recommendedSkills: asArray<string>(value.recommendedSkills).map(asString).filter(isAcceptableSkillLabel),
     jobRoleFit:
       value.jobRoleFit && typeof value.jobRoleFit === 'object'
         ? (value.jobRoleFit as Record<string, unknown>)
@@ -575,6 +640,7 @@ Critical extraction rules:
 - For each experience, title must contain only the job title. Do not include dates in title.
 - For each experience, company must contain only the employer/company name. Do not put Present, dates, or responsibilities in company.
 - For each experience, startDate and endDate must be separated. Keep "Present" as endDate for current jobs.
+- startDate and endDate must be SHORT date tokens only (e.g. "Jan 2020", "2022", "Present"). NEVER put responsibility bullets, patient-care narratives, epidemic/COVID descriptions, or phrases like "Managed patients..." inside startDate or endDate — those belong ONLY in responsibilities[].
 - If the PDF text merges words like "React Native DeveloperAug 2024 Present", split it into title "React Native Developer", startDate "Aug 2024", endDate "Present".
 - Correct obvious PDF/OCR extraction mistakes in common technical terms, for example "React NaOve" or "React Na(ve" should be "React Native".
 - summary must be a clean professional paragraph only. Do not include name, email, phone, LinkedIn, portfolio URL, or repeated job title in summary.
@@ -583,7 +649,11 @@ Critical extraction rules:
 - If the CV contains Recommendations/References, preserve them in additionalSections as {"title":"Recommendations","items":[...]} with recommender name, role/title, and recommendation text in each item when available.
 - If the CV contains sections not listed above, such as Academic Experience, Publications, Awards, Languages, or Websites & Profiles, preserve them in additionalSections with the same heading title and clean bullet items.
 - Do not put recommendations, references, supervisor names, URLs, academic metadata, locations, dates, or contact details into skills.
+- People names belong ONLY in fullName, experiences (as supervisors/colleagues in bullets), or additionalSections for recommendation letters — NEVER in the skills[] array. Do not output standalone given names, surnames, or "Dr. ..." as skills.
+- Skills must be noun phrases for abilities, tools, procedures, or methods only (2 words ideal, max 6). Exclude English filler ("as a", "in", "gaining"), cities, job titles, "Curriculum Vitae", page numbers, and sentence fragments.
 - Skills must contain only real skills/tools/technologies, e.g. React Native, Firebase, SQL, Python. Exclude phrases like "Name: Mr ...", "whom I supervised...", "CEO & Founder...", and links.
+- Healthcare / clinical CVs: put procedures, clinical systems, and equipment under category "technical" (short noun phrases only: "EKG", "phlebotomy", "CT interpretation"). Put bedside manner, teamwork, empathy, communication, leadership under category "soft". Never put narrative bullet text, patient-care sentences, recommender names, "Page N", or PDF artifacts into skills.
+- If the CV uses headings such as Clinical Skills, Licenses, Publications, Volunteer Work, or Rotations, either map items into the closest standard field OR include that heading in additionalSections with clean bullet items (no page numbers).
 Make the analysis practical and specific:
 - strengths must explain what is already working in the CV
 - weaknesses must explain what is hurting the CV
