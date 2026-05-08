@@ -689,30 +689,13 @@ textarea.input {
   background: color-mix(in srgb, var(--surface) 55%, transparent);
 }
 
-.voice-type-fallback-label {
-  margin: 0 0 8px;
-  font-size: 11px;
-  font-weight: 750;
-  color: var(--text-secondary);
-  letter-spacing: 0.02em;
+.voice-interview-transcript-footer {
+  align-items: center;
 }
 
-.voice-type-fallback-row {
-  align-items: stretch;
-}
-
-.voice-type-fallback-row .input-group {
-  flex: 1;
-  min-width: min(100%, 260px);
-}
-
-.voice-type-fallback-row .button {
-  align-self: flex-end;
-}
-
-.voice-type-fallback .label {
-  opacity: 0.82;
-  font-size: 10px;
+.voice-interview-transcript-footer .chat-end-button {
+  width: 100%;
+  max-width: 280px;
 }
 
 .voice-interview-topbar {
@@ -752,7 +735,7 @@ textarea.input {
 
 .voice-ai-stage-actions {
   width: 100%;
-  max-width: 400px;
+  max-width: 440px;
   margin-top: 18px;
   display: flex;
   flex-direction: column;
@@ -760,8 +743,58 @@ textarea.input {
   gap: 10px;
 }
 
-.voice-mic-button--hero {
+.voice-mic-stop-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
   width: 100%;
+}
+
+.voice-mic-row-filler {
+  flex: 1;
+  min-height: 54px;
+  min-width: 0;
+  border-radius: 999px;
+  border: 1px dashed color-mix(in srgb, var(--border) 90%, var(--text-secondary));
+  background: color-mix(in srgb, var(--surface) 40%, transparent);
+}
+
+/* iPhone-style end call: red circle + rotated handset */
+.voice-end-call-icon-btn {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: #ff3b30;
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow:
+    0 4px 16px rgba(255, 59, 48, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.voice-end-call-icon-btn:hover {
+  filter: brightness(1.06);
+}
+
+.voice-end-call-icon-btn:active {
+  transform: scale(0.96);
+}
+
+.voice-end-call-icon-svg {
+  transform: rotate(135deg);
+  margin-top: 1px;
+}
+
+.voice-mic-button--hero {
+  flex: 1;
+  min-width: 0;
+  width: auto;
   max-width: none;
   min-height: 54px;
   font-size: 16px;

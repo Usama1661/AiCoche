@@ -3621,6 +3621,19 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
   );
 }
 
+/** Short spoken welcome before the first interview question (voice UX). */
+function voiceInterviewerWelcomeCopy(profile: ProfileState): string {
+  const raw = profile.professionalProfile.fullName?.trim() || '';
+  const first = raw ? raw.split(/\s+/)[0] : '';
+  const name = first ? first.charAt(0).toUpperCase() + first.slice(1).toLowerCase() : 'there';
+  const role = (
+    profile.professionLabel ||
+    profile.professionalProfile.currentDesignation ||
+    'your field'
+  ).trim();
+  return `Hi ${name}, thanks for joining today — glad you could make it. I'm your practice interviewer for ${role}. We'll keep this conversational: take your time, think out loud if it helps, and I'll guide you through a few questions. Let's begin.`;
+}
+
 function VoiceInterviewSession({
   profile,
   user,
@@ -3645,21 +3658,35 @@ function VoiceInterviewSession({
   const [voiceSupported] = useState(() => browserSupportsSpeechRecognition());
   const [listening, setListening] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
-  const [typedFallback, setTypedFallback] = useState('');
   const stopRecognitionRef = useRef<(() => void) | null>(null);
   const transcriptRef = useRef('');
   const [aiSpeaking, setAiSpeaking] = useState(false);
   /** Brief pause after the model replies (before any speech), like an interviewer thinking. */
   const [reflecting, setReflecting] = useState(false);
 
-  const VOICE_GAP_MS = 920;
-  const VOICE_LEAD_IN_MS = 420;
-  const REFLECT_MIN_MS = 480;
-  const REFLECT_JITTER_MS = 420;
+  /** Pause between spoken chunks (feedback vs next question) — shorter feels more like a live interviewer. */
+  const VOICE_GAP_MS = 560;
+  /** Tiny beat before first audio so UI can paint; kept small so voice follows text quickly. */
+  const VOICE_LEAD_IN_FIRST_MS = 90;
+  /** After model returns, brief pause before TTS (was ~0.5–0.9s; too long vs transcript). */
+  const REFLECT_MIN_MS = 120;
+  const REFLECT_JITTER_MS = 140;
 
   function stopAiVoiceOutput() {
     cancelAllSpeech();
     setAiSpeaking(false);
+  }
+
+  function endVoiceCall() {
+    stopRecognitionRef.current?.();
+    stopRecognitionRef.current = null;
+    setListening(false);
+    transcriptRef.current = '';
+    setLiveTranscript('');
+    stopAiVoiceOutput();
+    setReflecting(false);
+    setTyping(false);
+    setSessionEnded(true);
   }
 
   async function speakAsInterviewer(
@@ -3669,10 +3696,10 @@ function VoiceInterviewSession({
     const parts = texts.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean);
     if (!parts.length) return;
     const leadIn = opts?.leadInMs ?? 0;
+    setAiSpeaking(true);
     if (leadIn > 0) {
       await new Promise<void>((r) => setTimeout(r, leadIn));
     }
-    setAiSpeaking(true);
     try {
       const pauseBetween = opts?.pauseBetweenMs ?? VOICE_GAP_MS;
       if (hasSupabase && supabase && user) {
@@ -3731,20 +3758,34 @@ function VoiceInterviewSession({
           response = mockStart(profile);
         }
         setSessionId(response.sessionId);
-        const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: response.question }];
+        const welcome = voiceInterviewerWelcomeCopy(profile);
+        const initialMessages: Message[] = [
+          { id: id(), role: 'assistant', content: welcome },
+          { id: id(), role: 'assistant', content: response.question },
+        ];
         setMessages(initialMessages);
         saveVoiceHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
         consumeInterviewCreditOnce();
-        void speakAsInterviewer([response.question], { leadInMs: VOICE_LEAD_IN_MS });
+        void speakAsInterviewer([welcome, response.question], {
+          leadInMs: VOICE_LEAD_IN_FIRST_MS,
+          pauseBetweenMs: 420,
+        });
       } catch (e) {
         const fallback = mockStart(profile);
         setSessionId(fallback.sessionId);
-        const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: fallback.question }];
+        const welcome = voiceInterviewerWelcomeCopy(profile);
+        const initialMessages: Message[] = [
+          { id: id(), role: 'assistant', content: welcome },
+          { id: id(), role: 'assistant', content: fallback.question },
+        ];
         setMessages(initialMessages);
         saveVoiceHistory({ id: fallback.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
         consumeInterviewCreditOnce();
         setError(e instanceof Error ? `Using offline interview mode: ${e.message}` : 'Using offline interview mode.');
-        void speakAsInterviewer([fallback.question], { leadInMs: VOICE_LEAD_IN_MS });
+        void speakAsInterviewer([welcome, fallback.question], {
+          leadInMs: VOICE_LEAD_IN_FIRST_MS,
+          pauseBetweenMs: 420,
+        });
       } finally {
         setTyping(false);
       }
@@ -3841,7 +3882,7 @@ function VoiceInterviewSession({
       const reflectMs = REFLECT_MIN_MS + Math.floor(Math.random() * REFLECT_JITTER_MS);
       await new Promise<void>((r) => setTimeout(r, reflectMs));
       setReflecting(false);
-      await speakAsInterviewer(spoken.filter(Boolean), { pauseBetweenMs: VOICE_GAP_MS });
+      await speakAsInterviewer(spoken.filter(Boolean), { pauseBetweenMs: VOICE_GAP_MS, leadInMs: 40 });
     } catch (e) {
       setReflecting(false);
       setError(e instanceof Error ? e.message : 'Request failed');
@@ -3927,23 +3968,49 @@ function VoiceInterviewSession({
         <p className="caption muted voice-ai-session-line">{profile.professionLabel || 'Career'} · mock interview</p>
 
         <div className="voice-ai-stage-actions">
-          {voiceSupported ? (
-            <>
+          {!sessionEnded ? (
+            <div className="voice-mic-stop-row">
+              {voiceSupported ? (
+                <button
+                  type="button"
+                  className={`voice-mic-button voice-mic-button--hero ${listening ? 'listening' : ''}`}
+                  onClick={toggleVoiceCapture}
+                  disabled={typing || reflecting}>
+                  {listening ? 'Tap to stop & send' : aiSpeaking ? 'Tap to interrupt & speak' : 'Tap to speak'}
+                </button>
+              ) : (
+                <div className="voice-mic-row-filler" aria-hidden />
+              )}
               <button
                 type="button"
-                className={`voice-mic-button voice-mic-button--hero ${listening ? 'listening' : ''}`}
-                onClick={toggleVoiceCapture}
-                disabled={typing || sessionEnded || reflecting}>
-                {sessionEnded ? 'Session ended' : listening ? 'Tap to stop & send' : aiSpeaking ? 'Tap to interrupt & speak' : 'Tap to speak'}
+                className="voice-end-call-icon-btn"
+                onClick={endVoiceCall}
+                aria-label="End voice call">
+                <svg className="voice-end-call-icon-svg" viewBox="0 0 24 24" width="26" height="26" aria-hidden>
+                  <path
+                    fill="currentColor"
+                    d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"
+                  />
+                </svg>
               </button>
+            </div>
+          ) : (
+            <p className="body muted" style={{ margin: 0, textAlign: 'center' }}>
+              Session ended — scroll down or go back to interviews.
+            </p>
+          )}
+          {voiceSupported && !sessionEnded ? (
+            <>
               {liveTranscript ? <p className="voice-live-transcript voice-live-transcript--hero body muted">{liveTranscript}</p> : null}
               <p className="caption muted voice-ai-hint">
-                Tap when it’s your turn. There’s a short pause between feedback and the next question.
+                Tap when it’s your turn. Red button ends audio and the mic (like ending a phone call). Short pause between feedback and the next question.
               </p>
             </>
-          ) : (
-            <p className="caption muted voice-ai-hint">Use the text box in the transcript below to answer.</p>
-          )}
+          ) : !sessionEnded ? (
+            <p className="caption muted voice-ai-hint">
+              Speech-to-text isn’t available in this browser. Use the back arrow and start a standard interview to type answers, or try Chrome on desktop. You can still end the session with the red button.
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -3979,25 +4046,7 @@ function VoiceInterviewSession({
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="voice-interview-controls voice-type-fallback stack voice-interview-controls--footer">
-          <p className="voice-type-fallback-label">Optional — type only if you prefer not to use the mic</p>
-          <div className="row voice-type-fallback-row">
-            <Field
-              label="Answer"
-              value={typedFallback}
-              onChange={setTypedFallback}
-              placeholder={sessionEnded ? 'Session ended' : 'Type your answer here…'}
-              multiline
-            />
-            <Button
-              onClick={() => {
-                void sendAnswer(typedFallback);
-                setTypedFallback('');
-              }}
-              disabled={!typedFallback.trim() || typing || sessionEnded || reflecting}>
-              Send
-            </Button>
-          </div>
+        <div className="voice-interview-controls voice-interview-transcript-footer stack voice-interview-controls--footer">
           <button className="button ghost chat-end-button" type="button" onClick={() => setView('interview')}>
             Back to interviews
           </button>
