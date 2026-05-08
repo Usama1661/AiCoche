@@ -3,6 +3,13 @@
 import { createClient, type User } from '@supabase/supabase-js';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { isAcceptableSkillLabel } from '@/lib/skillValidation';
+import {
+  browserSupportsSpeechRecognition,
+  cancelAllSpeech,
+  speakSequential,
+  speakSequentialHumanLike,
+  startSpeechRecognition,
+} from '@/lib/voiceWeb';
 
 type Theme = 'dark' | 'light';
 type Tab = 'home' | 'interview' | 'quiz' | 'profile' | 'settings';
@@ -16,6 +23,7 @@ type View =
   | 'cv-analysis'
   | 'professional-profile'
   | 'interview-session'
+  | 'voice-interview'
   | 'interview-history'
   | 'privacy-security'
   | 'privacy-policy'
@@ -1142,7 +1150,7 @@ export default function WebApp() {
       {user && profile.onboardingComplete ? (
         <>
           <WebHeader
-            active={isTab(view) ? view : null}
+            active={headerActiveTab(view)}
             theme={theme}
             setTheme={setTheme}
             usage={usage}
@@ -1166,6 +1174,7 @@ export default function WebApp() {
           {view === 'cv-analysis' ? <CvAnalysisScreen {...common} /> : null}
           {view === 'professional-profile' ? <ProfessionalProfileScreen {...common} /> : null}
           {view === 'interview-session' ? <InterviewSession {...common} /> : null}
+          {view === 'voice-interview' ? <VoiceInterviewSession {...common} /> : null}
           {view === 'interview-history' ? <InterviewHistorySession {...common} /> : null}
           {view === 'privacy-security' ? <InfoPage title="Privacy & Security" setView={setView} /> : null}
           {view === 'privacy-policy' ? <InfoPage title="Privacy Policy" setView={setView} /> : null}
@@ -2618,6 +2627,17 @@ function InterviewTab({ profile, metrics, usage, setUsage, reminders, setReminde
           <p className="body muted">AI-powered {profile.professionLabel || 'career'} interview</p>
         </div>
       </button>
+      <button
+        className="hero-card row"
+        type="button"
+        onClick={() => setView('voice-interview')}
+        style={{ textAlign: 'left', cursor: 'pointer', borderStyle: 'dashed' }}>
+        <div className="icon-box" style={{ color: 'white', background: 'color-mix(in srgb, var(--primary) 55%, var(--elevated))' }}>🎙</div>
+        <div>
+          <h2 className="subtitle">Voice mock interview</h2>
+          <p className="body muted">Speak your answers; AiCoche reads questions aloud (beta · Chrome / Edge)</p>
+        </div>
+      </button>
       <div className="card row between">
         <div className="row">
           <div className="icon-box" style={{ color: 'var(--gold)', background: 'var(--warning-tint)' }}>⏰</div>
@@ -3538,6 +3558,392 @@ function InterviewSession({ profile, metrics, setMetrics, usage, setUsage, setIn
   );
 }
 
+function VoiceInterviewSession({
+  profile,
+  user,
+  metrics,
+  setMetrics,
+  usage,
+  setUsage,
+  setInterviewSessions,
+  setView,
+  setError,
+}: CommonProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState('');
+  const [typing, setTyping] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const interviewUsageCountedRef = useRef(false);
+  const interviewStartedRef = useRef(false);
+  const cvReady = hasCvAnalysisMetrics(metrics);
+  const canStart = usage.plan === 'pro' || usage.chatsUsed < FREE_CHAT_LIMIT;
+  const sessionTitle = `${profile.professionLabel || 'Career'} voice mock interview`;
+  const [voiceSupported] = useState(() => browserSupportsSpeechRecognition());
+  const [listening, setListening] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [typedFallback, setTypedFallback] = useState('');
+  const stopRecognitionRef = useRef<(() => void) | null>(null);
+  const transcriptRef = useRef('');
+  const [aiSpeaking, setAiSpeaking] = useState(false);
+  /** Brief pause after the model replies (before any speech), like an interviewer thinking. */
+  const [reflecting, setReflecting] = useState(false);
+
+  const VOICE_GAP_MS = 920;
+  const VOICE_LEAD_IN_MS = 420;
+  const REFLECT_MIN_MS = 480;
+  const REFLECT_JITTER_MS = 420;
+
+  function stopAiVoiceOutput() {
+    cancelAllSpeech();
+    setAiSpeaking(false);
+  }
+
+  async function speakAsInterviewer(
+    texts: string[],
+    opts?: { pauseBetweenMs?: number; leadInMs?: number }
+  ) {
+    const parts = texts.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if (!parts.length) return;
+    const leadIn = opts?.leadInMs ?? 0;
+    if (leadIn > 0) {
+      await new Promise<void>((r) => setTimeout(r, leadIn));
+    }
+    setAiSpeaking(true);
+    try {
+      const pauseBetween = opts?.pauseBetweenMs ?? VOICE_GAP_MS;
+      if (hasSupabase && supabase && user) {
+        await speakSequentialHumanLike(supabase, parts, undefined, { pauseBetweenMs: pauseBetween });
+      } else {
+        await new Promise<void>((resolve) =>
+          speakSequential(parts, () => resolve(), { pauseBetweenMs: pauseBetween })
+        );
+      }
+    } finally {
+      setAiSpeaking(false);
+    }
+  }
+
+  function consumeInterviewCreditOnce() {
+    if (interviewUsageCountedRef.current) return;
+    interviewUsageCountedRef.current = true;
+    setUsage((u) => ({ ...u, chatsUsed: u.chatsUsed + 1 }));
+  }
+
+  function saveVoiceHistory(partial: Partial<InterviewHistoryItem> & { id: string; messages: Message[] }) {
+    const now = new Date().toISOString();
+    const item: InterviewHistoryItem = {
+      id: partial.id,
+      title: partial.title ?? sessionTitle,
+      status: partial.status ?? 'active',
+      score: partial.score ?? null,
+      turnCount: partial.turnCount ?? partial.messages.filter((message) => message.role === 'user').length,
+      messages: partial.messages,
+      createdAt: partial.createdAt ?? now,
+      updatedAt: partial.updatedAt ?? now,
+    };
+    setInterviewSessions((current) => upsertInterviewHistory(current, item));
+  }
+
+  useEffect(() => {
+    if (!cvReady) return;
+    if (interviewStartedRef.current) return;
+    interviewStartedRef.current = true;
+    async function start() {
+      if (!canStart) {
+        setError('Free plan interview limit reached. Upgrade to Pro from Profile to continue.');
+        setView('interview');
+        return;
+      }
+      setTyping(true);
+      try {
+        let response: { sessionId: string; question: string };
+        if (hasSupabase && supabase) {
+          const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
+            body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+          });
+          if (error) throw error;
+          response = normalizeStartInterviewResponse(data, profile);
+        } else {
+          response = mockStart(profile);
+        }
+        setSessionId(response.sessionId);
+        const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: response.question }];
+        setMessages(initialMessages);
+        saveVoiceHistory({ id: response.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+        consumeInterviewCreditOnce();
+        void speakAsInterviewer([response.question], { leadInMs: VOICE_LEAD_IN_MS });
+      } catch (e) {
+        const fallback = mockStart(profile);
+        setSessionId(fallback.sessionId);
+        const initialMessages: Message[] = [{ id: id(), role: 'assistant', content: fallback.question }];
+        setMessages(initialMessages);
+        saveVoiceHistory({ id: fallback.sessionId, title: sessionTitle, messages: initialMessages, status: 'active' });
+        consumeInterviewCreditOnce();
+        setError(e instanceof Error ? `Using offline interview mode: ${e.message}` : 'Using offline interview mode.');
+        void speakAsInterviewer([fallback.question], { leadInMs: VOICE_LEAD_IN_MS });
+      } finally {
+        setTyping(false);
+      }
+    }
+    void start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cvReady]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, typing]);
+
+  useEffect(() => {
+    return () => {
+      cancelAllSpeech();
+      stopRecognitionRef.current?.();
+      stopRecognitionRef.current = null;
+    };
+  }, []);
+
+  const voiceStatusLabel = sessionEnded
+    ? 'Session complete'
+    : reflecting
+      ? 'Taking a moment…'
+      : typing
+        ? 'Thinking…'
+        : aiSpeaking
+          ? 'AiCoche is speaking'
+          : listening
+            ? 'Listening…'
+            : 'Your turn — tap to speak below';
+
+  async function sendAnswer(answer: string) {
+    const trimmed = answer.trim();
+    if (!trimmed || typing || sessionEnded) return;
+    const userMessage: Message = { id: id(), role: 'user', content: trimmed };
+    const answeredMessages = [...messages, userMessage];
+    const userAnswerCount = answeredMessages.filter((message) => message.role === 'user').length;
+    setMessages(answeredMessages);
+    setTyping(true);
+    stopAiVoiceOutput();
+    try {
+      let response: { feedback: string; score: number; nextQuestion: string | null; finished: boolean };
+      if (hasSupabase && supabase && sessionId) {
+        const { data, error } = await supabase.functions.invoke<typeof response>('continue-interview', {
+          body: { sessionId, answer: trimmed },
+        });
+        if (error) throw error;
+        response = normalizeContinueInterviewResponse(data, userAnswerCount, profile);
+      } else {
+        await new Promise((r) => setTimeout(r, 600));
+        response = mockContinue(
+          userAnswerCount,
+          profile.professionLabel || profile.professionalProfile.currentDesignation || ''
+        );
+      }
+      setMetrics((m) => ({ ...m, lastInterviewScore: response.score }));
+      const nextMessages: Message[] = [
+        ...answeredMessages,
+        { id: id(), role: 'assistant', content: response.feedback, score: response.score },
+        ...(response.nextQuestion
+          ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }]
+          : [{ id: id(), role: 'assistant' as const, content: 'That completes this mock interview. Great work!' }]),
+      ];
+      const status = response.finished ? 'completed' : 'active';
+      if (response.finished) setSessionEnded(true);
+      setMessages(nextMessages);
+      saveVoiceHistory({
+        id: sessionId || id(),
+        title: sessionTitle,
+        messages: nextMessages,
+        status,
+        score: response.score,
+        turnCount: answeredMessages.filter((message) => message.role === 'user').length,
+      });
+      if (hasSupabase && supabase && sessionId) {
+        void supabase.functions.invoke('save-interview-session', {
+          body: {
+            sessionId,
+            title: sessionTitle,
+            profile: buildUserProfile(profile),
+            messages: nextMessages.map((message) => ({ role: message.role, content: message.content, score: message.score })),
+            status,
+            score: response.score * 10,
+            feedback: { latestScore: response.score },
+          },
+        });
+      }
+      const spoken: string[] = [response.feedback];
+      if (response.nextQuestion) spoken.push(response.nextQuestion);
+      else spoken.push('That completes this mock interview. Great work!');
+      setTyping(false);
+      setReflecting(true);
+      const reflectMs = REFLECT_MIN_MS + Math.floor(Math.random() * REFLECT_JITTER_MS);
+      await new Promise<void>((r) => setTimeout(r, reflectMs));
+      setReflecting(false);
+      await speakAsInterviewer(spoken.filter(Boolean), { pauseBetweenMs: VOICE_GAP_MS });
+    } catch (e) {
+      setReflecting(false);
+      setError(e instanceof Error ? e.message : 'Request failed');
+    } finally {
+      setTyping(false);
+    }
+  }
+
+  function toggleVoiceCapture() {
+    if (!voiceSupported || typing || sessionEnded || reflecting) return;
+    if (listening) {
+      stopRecognitionRef.current?.();
+      stopRecognitionRef.current = null;
+      setListening(false);
+      const text = transcriptRef.current.trim();
+      transcriptRef.current = '';
+      setLiveTranscript('');
+      if (text) void sendAnswer(text);
+      return;
+    }
+    stopAiVoiceOutput();
+    transcriptRef.current = '';
+    setLiveTranscript('');
+    stopRecognitionRef.current = startSpeechRecognition('en-US', {
+      onInterim: (text) => {
+        transcriptRef.current = text;
+        setLiveTranscript(text);
+      },
+      onError: (msg) => setError(`Microphone / speech: ${msg}`),
+      onEnd: () => setListening(false),
+    });
+    setListening(true);
+  }
+
+  if (!cvReady) {
+    return (
+      <section className="screen stack interview-screen">
+        <div className="interview-topbar">
+          <Header title="Voice interview" onBack={() => setView('interview')} />
+        </div>
+        <CvAnalysisGateCard setView={setView} />
+      </section>
+    );
+  }
+
+  return (
+    <section className="screen voice-interview-layout">
+      <div className="interview-topbar voice-interview-topbar">
+        <Header
+          title="AI voice interview"
+          subtitle={
+            hasSupabase && user
+              ? 'Natural voice · quiet room & headphones recommended'
+              : 'Sign in for neural speech · browser voice otherwise'
+          }
+          onBack={() => setView('interview')}
+        />
+        {usage.plan === 'free' ? (
+          <span className="mini-pill">
+            Free interviews {usage.chatsUsed} / {FREE_CHAT_LIMIT}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="voice-ai-stage card voice-ai-stage--sticky" aria-live="polite">
+        <div
+          className={`voice-ai-orb-stage ${typing || reflecting ? 'state-thinking' : ''} ${aiSpeaking ? 'state-speaking' : ''} ${listening ? 'state-listening' : ''}`}>
+          <div className="voice-ai-orb-ring voice-ai-orb-ring--r1" aria-hidden />
+          <div className="voice-ai-orb-ring voice-ai-orb-ring--r2" aria-hidden />
+          <div className="voice-ai-orb-ring voice-ai-orb-ring--r3" aria-hidden />
+          <div className="voice-ai-orb-core">
+            <span className="voice-ai-orb-face" aria-hidden>
+              A
+            </span>
+          </div>
+          <div className={`voice-ai-waveform ${aiSpeaking ? 'active' : ''}`} aria-hidden>
+            {Array.from({ length: 11 }).map((_, i) => (
+              <span key={i} className="voice-ai-wave-bar" style={{ animationDelay: `${i * 0.045}s` }} />
+            ))}
+          </div>
+        </div>
+        <p className="voice-ai-status">{voiceStatusLabel}</p>
+        <p className="caption muted voice-ai-session-line">{profile.professionLabel || 'Career'} · mock interview</p>
+
+        <div className="voice-ai-stage-actions">
+          {voiceSupported ? (
+            <>
+              <button
+                type="button"
+                className={`voice-mic-button voice-mic-button--hero ${listening ? 'listening' : ''}`}
+                onClick={toggleVoiceCapture}
+                disabled={typing || sessionEnded || reflecting}>
+                {sessionEnded ? 'Session ended' : listening ? 'Tap to stop & send' : aiSpeaking ? 'Tap to interrupt & speak' : 'Tap to speak'}
+              </button>
+              {liveTranscript ? <p className="voice-live-transcript voice-live-transcript--hero body muted">{liveTranscript}</p> : null}
+              <p className="caption muted voice-ai-hint">
+                Tap when it’s your turn. There’s a short pause between feedback and the next question.
+              </p>
+            </>
+          ) : (
+            <p className="caption muted voice-ai-hint">Use the text box in the transcript below to answer.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="interview-chat-card voice-interview-transcript-card">
+        <div className="voice-transcript-toolbar">
+          <h2 className="voice-transcript-heading-title">Transcript</h2>
+          <span className={`voice-live-chip ${typing || reflecting || aiSpeaking || listening ? 'on' : ''}`}>
+            {typing ? 'Working' : reflecting ? 'Pausing' : aiSpeaking ? 'Speaking' : listening ? 'Mic on' : 'Idle'}
+          </span>
+        </div>
+
+        <div className="chat-scroll voice-interview-chat-scroll" aria-live="polite">
+          {messages.map((message) => (
+            <div key={message.id} className={`chat-row ${message.role === 'user' ? 'from-user' : 'from-ai'}`}>
+              <div className="chat-avatar">{message.role === 'user' ? 'You' : 'AI'}</div>
+              <div className="message">
+                <span className="message-label">{message.role === 'user' ? 'Your answer' : 'AiCoche'}</span>
+                <p className="body">{message.content}</p>
+                {message.score != null ? <span className="chip success">Score {message.score}</span> : null}
+              </div>
+            </div>
+          ))}
+          {typing ? (
+            <div className="chat-row from-ai">
+              <div className="chat-avatar">AI</div>
+              <div className="message typing-bubble" aria-label="AiCoche is typing">
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+          ) : null}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div className="voice-interview-controls voice-type-fallback stack voice-interview-controls--footer">
+          <p className="voice-type-fallback-label">Optional — type only if you prefer not to use the mic</p>
+          <div className="row voice-type-fallback-row">
+            <Field
+              label="Answer"
+              value={typedFallback}
+              onChange={setTypedFallback}
+              placeholder={sessionEnded ? 'Session ended' : 'Type your answer here…'}
+              multiline
+            />
+            <Button
+              onClick={() => {
+                void sendAnswer(typedFallback);
+                setTypedFallback('');
+              }}
+              disabled={!typedFallback.trim() || typing || sessionEnded || reflecting}>
+              Send
+            </Button>
+          </div>
+          <button className="button ghost chat-end-button" type="button" onClick={() => setView('interview')}>
+            Back to interviews
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function InterviewHistorySession({ profile, metrics, setMetrics, usage, interviewSessions, setInterviewSessions, selectedInterviewSessionId, setView, setError }: CommonProps) {
   const selected = interviewSessions.find((session) => session.id === selectedInterviewSessionId) ?? null;
   const [messages, setMessages] = useState<Message[]>(selected?.messages ?? []);
@@ -4320,6 +4726,11 @@ function labelGoal(value: Goal | null) {
 
 function isTab(view: View): view is Tab {
   return view === 'home' || view === 'interview' || view === 'quiz' || view === 'profile' || view === 'settings';
+}
+
+function headerActiveTab(view: View): Tab | null {
+  if (view === 'voice-interview' || view === 'interview-session' || view === 'interview-history') return 'interview';
+  return isTab(view) ? view : null;
 }
 
 function Button({
