@@ -1,17 +1,25 @@
 'use client';
 
 import { createClient, type User } from '@supabase/supabase-js';
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { isAcceptableSkillLabel } from '@/lib/skillValidation';
 import { consumeContinueInterviewStream } from '@/lib/continueInterviewStream';
 import { consumeStartInterviewStream } from '@/lib/startInterviewStream';
 import {
   browserSupportsSpeechRecognition,
   cancelAllSpeech,
+  previewInterviewTtsVoice,
   speakSequential,
   speakSequentialHumanLike,
   startSpeechRecognition,
 } from '@/lib/voiceWeb';
+import {
+  ASSISTANT_TTS_VOICE_OPTIONS,
+  DEFAULT_ASSISTANT_TTS_VOICE,
+  type AssistantTtsVoiceId,
+  normalizeAssistantTtsVoice,
+} from '../../src/lib/assistantTtsVoice';
 
 type Theme = 'dark' | 'light';
 type Tab = 'home' | 'interview' | 'quiz' | 'profile' | 'settings';
@@ -261,6 +269,37 @@ type DirectProfileTables = {
 const FREE_CHAT_LIMIT = 3;
 /** Free tier: one CV analysis (see upgrade modal Free column). */
 const FREE_CV_LIMIT = 1;
+
+/** Max practice answers per mock interview (matches edge `MAX_TURNS`). */
+const INTERVIEW_QUESTION_CAP = 6;
+
+/** Elapsed session clock: MM:SS, or H:MM:SS when over an hour. */
+function formatInterviewElapsed(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
+function useInterviewElapsedTime(active: boolean, ended: boolean): { elapsedSec: number } {
+  const startMsRef = useRef<number | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    if (startMsRef.current === null) startMsRef.current = Date.now();
+  }, [active]);
+  useEffect(() => {
+    if (!active || ended) return;
+    setTick(Date.now());
+    const id = window.setInterval(() => setTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [active, ended]);
+  const elapsedSec =
+    active && startMsRef.current !== null ? Math.max(0, Math.floor((tick - startMsRef.current) / 1000)) : 0;
+  return { elapsedSec };
+}
 
 /**
  * Display-only suggested prices (USD / month). Tune after you model API + infra cost per active user.
@@ -1024,7 +1063,7 @@ function applyAnalysisToProfile(profile: ProfileState, analysis: CvAnalysis, cvT
 
 export default function WebApp() {
   const [hydrated, setHydrated] = useState(false);
-  const [theme, setTheme] = useState<Theme>('dark');
+  const [theme, setTheme] = useState<Theme>(() => storageGet<Theme>('aicoche-web-theme', 'dark'));
   const [view, setView] = useState<View>('splash');
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ProfileState>(initialProfile);
@@ -1037,15 +1076,19 @@ export default function WebApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [upgradeModalVariant, setUpgradeModalVariant] = useState<'interview' | 'cv' | null>(null);
+  const [assistantTtsVoice, setAssistantTtsVoice] = useState<AssistantTtsVoiceId>(DEFAULT_ASSISTANT_TTS_VOICE);
   const remoteProfileLoadedFor = useRef<string | null>(null);
 
   useEffect(() => {
-    setTheme(storageGet<Theme>('aicoche-web-theme', 'dark'));
+    setTheme(storageGet<Theme>('aicoche-web-theme', 'dark')); // re-read after hydration (e.g. other tabs)
     setProfile(normalizeProfileState(storageGet<ProfileState>('aicoche-web-profile', initialProfile)));
     setMetrics(storageGet<MetricsState>('aicoche-web-metrics', initialMetrics));
     setUsage(storageGet<UsageState>('aicoche-web-usage', { plan: 'free', chatsUsed: 0, cvAnalysesUsed: 0 }));
     setReminders(normalizeReminders(storageGet<unknown>('aicoche-web-reminders', [])));
     setInterviewSessions(normalizeInterviewHistory(storageGet<unknown>('aicoche-web-interview-sessions', [])));
+    setAssistantTtsVoice(
+      normalizeAssistantTtsVoice(storageGet<string>('aicoche-web-assistant-tts-voice', DEFAULT_ASSISTANT_TTS_VOICE))
+    );
 
     supabase?.auth.getUser().then(({ data }) => {
       const authUser = data.user ?? null;
@@ -1062,6 +1105,11 @@ export default function WebApp() {
   }, []);
 
   useEffect(() => storageSet('aicoche-web-theme', theme), [theme]);
+  /** Modals use `createPortal(..., document.body)`; theme must live on `html` so they inherit `[data-theme='light']` variables. */
+  useLayoutEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
   useEffect(() => {
     if (!hydrated) return;
     if (user) {
@@ -1074,6 +1122,7 @@ export default function WebApp() {
   useEffect(() => storageSet('aicoche-web-usage', usage), [usage]);
   useEffect(() => storageSet('aicoche-web-reminders', reminders), [reminders]);
   useEffect(() => storageSet('aicoche-web-interview-sessions', interviewSessions), [interviewSessions]);
+  useEffect(() => storageSet('aicoche-web-assistant-tts-voice', assistantTtsVoice), [assistantTtsVoice]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1146,6 +1195,8 @@ export default function WebApp() {
     busy,
     setBusy,
     openUpgradeModal: (variant: 'interview' | 'cv') => setUpgradeModalVariant(variant),
+    assistantTtsVoice,
+    setAssistantTtsVoice,
   };
 
   if (!hydrated) {
@@ -1188,10 +1239,13 @@ export default function WebApp() {
           {view === 'profile' ? <Profile {...common} onSignOut={signOut} /> : null}
           {view === 'settings' ? (
             <Settings
+              user={user}
               theme={theme}
               setTheme={setTheme}
               onSignOut={signOut}
               setView={setView}
+              assistantTtsVoice={assistantTtsVoice}
+              setAssistantTtsVoice={setAssistantTtsVoice}
             />
           ) : null}
           {view === 'cv-upload' ? <CvUpload {...common} /> : null}
@@ -1230,6 +1284,8 @@ type CommonProps = {
   setBusy: (busy: boolean) => void;
   /** Opens the full-screen upgrade plan modal (interview vs CV copy). */
   openUpgradeModal?: (variant: 'interview' | 'cv') => void;
+  assistantTtsVoice: AssistantTtsVoiceId;
+  setAssistantTtsVoice: React.Dispatch<React.SetStateAction<AssistantTtsVoiceId>>;
 };
 
 function Loading({ theme }: { theme: Theme }) {
@@ -2500,7 +2556,7 @@ function ProjectDetailModal({
   const showDetails = !narrowLayout || mobileCoachTab === 'details';
   const showChat = !narrowLayout || mobileCoachTab === 'chat';
 
-  return (
+  const modalNode = (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal project-modal stack" onClick={(event) => event.stopPropagation()}>
         <header className="project-modal-header">
@@ -2618,6 +2674,8 @@ function ProjectDetailModal({
       </div>
     </div>
   );
+  if (typeof document === 'undefined') return null;
+  return createPortal(modalNode, document.body);
 }
 
 function ProjectBullets({ title, items }: { title: string; items: string[] }) {
@@ -3269,24 +3327,115 @@ function Profile({ user, profile, setProfile, usage, setUsage, setError, onSignO
       </div>
       {modal ? (
         <Modal title={`Add ${modal}`} onClose={() => setModal(null)}>
-          <Field label="Name" value={draft} onChange={setDraft} />
-          <Button onClick={addItem}>Save</Button>
+          <div className="stack modal-form-body">
+            <Field label="Name" value={draft} onChange={setDraft} />
+            <div className="modal-form-footer">
+              <Button className="modal-footer-cta" onClick={addItem}>
+                Save
+              </Button>
+            </div>
+          </div>
         </Modal>
       ) : null}
       {editOpen ? (
         <Modal title="Edit profile" onClose={() => setEditOpen(false)}>
-          <Field label="Full name" value={profileDraft.fullName} onChange={(fullName) => setProfileDraft((d) => ({ ...d, fullName }))} />
-          <Field label="Profession" value={profileDraft.professionLabel} onChange={(professionLabel) => setProfileDraft((d) => ({ ...d, professionLabel }))} />
-          <Field label="Preferred language" value={profileDraft.language} onChange={(language) => setProfileDraft((d) => ({ ...d, language }))} />
-          <Button onClick={saveProfileDetails}>Save changes</Button>
+          <div className="stack modal-form-body">
+            <Field label="Full name" value={profileDraft.fullName} onChange={(fullName) => setProfileDraft((d) => ({ ...d, fullName }))} />
+            <Field label="Profession" value={profileDraft.professionLabel} onChange={(professionLabel) => setProfileDraft((d) => ({ ...d, professionLabel }))} />
+            <Field label="Preferred language" value={profileDraft.language} onChange={(language) => setProfileDraft((d) => ({ ...d, language }))} />
+            <div className="modal-form-footer">
+              <Button className="modal-footer-cta" onClick={saveProfileDetails}>
+                Save changes
+              </Button>
+            </div>
+          </div>
         </Modal>
       ) : null}
     </section>
   );
 }
 
-function Settings({ theme, setTheme, onSignOut, setView }: { theme: Theme; setTheme: (t: Theme) => void; onSignOut: () => void; setView: (view: View) => void }) {
+function AssistantVoicePickerBody({
+  user,
+  assistantTtsVoice,
+  setAssistantTtsVoice,
+}: {
+  user: User | null;
+  assistantTtsVoice: AssistantTtsVoiceId;
+  setAssistantTtsVoice: React.Dispatch<React.SetStateAction<AssistantTtsVoiceId>>;
+}) {
+  const [previewVoiceId, setPreviewVoiceId] = useState<AssistantTtsVoiceId | null>(null);
+
+  async function playVoiceSample(voiceId: AssistantTtsVoiceId) {
+    if (!hasSupabase || !supabase || !user) {
+      window.alert('Sign in to hear a short voice sample.');
+      return;
+    }
+    setPreviewVoiceId(voiceId);
+    try {
+      await previewInterviewTtsVoice(supabase, voiceId);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not play this sample.');
+    } finally {
+      setPreviewVoiceId(null);
+    }
+  }
+
+  return (
+    <div className="voice-picker-modal-body">
+      <p className="body muted voice-picker-modal-intro">
+        Choose your practice assistant: tap <strong>Play sample</strong> to preview, then tap their name to select (signed-in users).
+      </p>
+      <div className="voice-picker-option-list">
+        {ASSISTANT_TTS_VOICE_OPTIONS.map((opt) => {
+          const selected = assistantTtsVoice === opt.id;
+          const playing = previewVoiceId === opt.id;
+          return (
+            <div key={opt.id} className={`voice-picker-option${selected ? ' voice-picker-option--selected' : ''}`}>
+              <button type="button" className="button ghost voice-picker-option__text" onClick={() => setAssistantTtsVoice(opt.id)}>
+                <span className="voice-picker-option__title subtitle">{opt.assistantName}</span>
+                <span className="voice-picker-option__tone-tag caption">
+                  {opt.gender} · {opt.toneType}
+                </span>
+              </button>
+              <span className="voice-picker-option__check" aria-hidden>
+                {selected ? '✓' : ''}
+              </span>
+              <Button
+                variant="secondary"
+                disabled={Boolean(previewVoiceId)}
+                onClick={() => void playVoiceSample(opt.id)}
+                style={{ flexShrink: 0, alignSelf: 'center' }}>
+                {playing ? 'Playing…' : 'Play sample'}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Settings({
+  user,
+  theme,
+  setTheme,
+  onSignOut,
+  setView,
+  assistantTtsVoice,
+  setAssistantTtsVoice,
+}: {
+  user: User | null;
+  theme: Theme;
+  setTheme: (t: Theme) => void;
+  onSignOut: () => void;
+  setView: (view: View) => void;
+  assistantTtsVoice: AssistantTtsVoiceId;
+  setAssistantTtsVoice: React.Dispatch<React.SetStateAction<AssistantTtsVoiceId>>;
+}) {
   const [notifications, setNotifications] = useState(true);
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  const voiceLabel = ASSISTANT_TTS_VOICE_OPTIONS.find((o) => o.id === assistantTtsVoice)?.assistantName ?? assistantTtsVoice;
   return (
     <section className="screen stack">
       <div>
@@ -3296,7 +3445,7 @@ function Settings({ theme, setTheme, onSignOut, setView }: { theme: Theme; setTh
       <SettingsGroup title="Preferences">
         <SettingsRow label="Notifications" value={notifications} onToggle={setNotifications} />
         <SettingsRow label="Appearance" value={theme === 'dark'} onToggle={(enabled) => setTheme(enabled ? 'dark' : 'light')} />
-        <SettingsRow label="Calendar Settings" onClick={() => alert('Calendar integrations are coming soon.')} />
+        <SettingsRow label={`Personal AI assistant voice (${voiceLabel})`} onClick={() => setVoiceModalOpen(true)} />
       </SettingsGroup>
       <SettingsGroup title="Account">
         <SettingsRow label="Privacy & Security" onClick={() => setView('privacy-security')} />
@@ -3305,6 +3454,15 @@ function Settings({ theme, setTheme, onSignOut, setView }: { theme: Theme; setTh
         <SettingsRow label="Sign Out" danger onClick={onSignOut} />
         <SettingsRow label="Delete Account" danger onClick={() => alert('Account deletion needs a secure backend endpoint before it can permanently remove your Supabase user.')} />
       </SettingsGroup>
+      {voiceModalOpen ? (
+        <Modal title="Personal AI assistant voice" onClose={() => setVoiceModalOpen(false)} wide>
+          <AssistantVoicePickerBody
+            user={user}
+            assistantTtsVoice={assistantTtsVoice}
+            setAssistantTtsVoice={setAssistantTtsVoice}
+          />
+        </Modal>
+      ) : null}
     </section>
   );
 }
@@ -3492,6 +3650,9 @@ function InterviewSession({
   const cvReady = hasCvAnalysisMetrics(metrics);
   const canStart = usage.plan === 'pro' || usage.chatsUsed < FREE_CHAT_LIMIT;
   const sessionTitle = `${profile.professionLabel || 'Career'} mock interview`;
+  const userAnswerCount = useMemo(() => messages.filter((m) => m.role === 'user').length, [messages]);
+  const { elapsedSec } = useInterviewElapsedTime(cvReady, sessionEnded);
+  const questionSlot = sessionEnded ? INTERVIEW_QUESTION_CAP : Math.min(INTERVIEW_QUESTION_CAP, userAnswerCount + 1);
 
   function consumeInterviewCreditOnce() {
     if (interviewUsageCountedRef.current) return;
@@ -3735,11 +3896,25 @@ function InterviewSession({
     <section className="screen interview-screen">
       <div className="interview-topbar">
         <Header title="Mock interview" onBack={() => setView('interview')} />
-        {usage.plan === 'free' ? (
-          <span className="mini-pill">
-            Free interviews {usage.chatsUsed} / {FREE_CHAT_LIMIT} (6 questions each)
+        <div className="interview-topbar-right">
+          <span
+            className="interview-call-timer"
+            title="Elapsed time since this practice session started">
+            <span className="interview-call-timer__label">Session</span>
+            <span className="interview-call-timer__value">{formatInterviewElapsed(elapsedSec)}</span>
+            <span className="interview-call-timer__sep" aria-hidden>
+              ·
+            </span>
+            <span className="interview-call-timer__q">
+              Q{questionSlot}/{INTERVIEW_QUESTION_CAP}
+            </span>
           </span>
-        ) : null}
+          {usage.plan === 'free' ? (
+            <span className="mini-pill">
+              Free interviews {usage.chatsUsed} / {FREE_CHAT_LIMIT} (6 questions each)
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="interview-chat-card">
@@ -3878,6 +4053,7 @@ function VoiceInterviewSession({
   setView,
   setError,
   openUpgradeModal,
+  assistantTtsVoice,
 }: CommonProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState('');
@@ -3889,6 +4065,9 @@ function VoiceInterviewSession({
   const cvReady = hasCvAnalysisMetrics(metrics);
   const canStart = usage.plan === 'pro' || usage.chatsUsed < FREE_CHAT_LIMIT;
   const sessionTitle = `${profile.professionLabel || 'Career'} voice mock interview`;
+  const userAnswerCount = useMemo(() => messages.filter((m) => m.role === 'user').length, [messages]);
+  const { elapsedSec } = useInterviewElapsedTime(cvReady, sessionEnded);
+  const questionSlot = sessionEnded ? INTERVIEW_QUESTION_CAP : Math.min(INTERVIEW_QUESTION_CAP, userAnswerCount + 1);
   const [voiceSupported] = useState(() => browserSupportsSpeechRecognition());
   const [listening, setListening] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
@@ -3953,7 +4132,10 @@ function VoiceInterviewSession({
     try {
       const pauseBetween = opts?.pauseBetweenMs ?? VOICE_GAP_MS;
       if (hasSupabase && supabase && user) {
-        await speakSequentialHumanLike(supabase, parts, undefined, { pauseBetweenMs: pauseBetween });
+        await speakSequentialHumanLike(supabase, parts, undefined, {
+          pauseBetweenMs: pauseBetween,
+          voice: assistantTtsVoice,
+        });
       } else {
         await new Promise<void>((resolve) =>
           speakSequential(parts, () => resolve(), { pauseBetweenMs: pauseBetween })
@@ -4431,11 +4613,25 @@ function VoiceInterviewSession({
           }
           onBack={() => setView('interview')}
         />
-        {usage.plan === 'free' ? (
-          <span className="mini-pill">
-            Free interviews {usage.chatsUsed} / {FREE_CHAT_LIMIT}
+        <div className="interview-topbar-right">
+          <span
+            className="interview-call-timer"
+            title="Elapsed time since this practice call started">
+            <span className="interview-call-timer__label">Session</span>
+            <span className="interview-call-timer__value">{formatInterviewElapsed(elapsedSec)}</span>
+            <span className="interview-call-timer__sep" aria-hidden>
+              ·
+            </span>
+            <span className="interview-call-timer__q">
+              Q{questionSlot}/{INTERVIEW_QUESTION_CAP}
+            </span>
           </span>
-        ) : null}
+          {usage.plan === 'free' ? (
+            <span className="mini-pill">
+              Free interviews {usage.chatsUsed} / {FREE_CHAT_LIMIT}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="voice-ai-stage card voice-ai-stage--sticky" aria-live="polite">
@@ -5363,6 +5559,7 @@ function Button({
   variant,
   style,
   title,
+  className,
 }: {
   children: React.ReactNode;
   onClick: () => void;
@@ -5370,9 +5567,17 @@ function Button({
   variant?: 'secondary' | 'ghost' | 'danger';
   style?: React.CSSProperties;
   title?: string;
+  className?: string;
 }) {
+  const extra = className?.trim() ?? '';
   return (
-    <button className={`button ${variant ?? ''}`} type="button" onClick={onClick} disabled={disabled} style={style} title={title}>
+    <button
+      className={['button', variant ?? '', extra].filter(Boolean).join(' ')}
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={style}
+      title={title}>
       {children}
     </button>
   );
@@ -5554,15 +5759,45 @@ function SettingsRow({ label, value, onToggle, onClick, danger }: { label: strin
   );
 }
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return (
+function Modal({
+  title,
+  children,
+  onClose,
+  wide,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  /** Wider, scrollable body for long lists (e.g. voice picker). */
+  wide?: boolean;
+}) {
+  const node = (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal stack" onClick={(e) => e.stopPropagation()}>
-        <div className="row between"><h2 className="title">{title}</h2><Button variant="ghost" onClick={onClose}>Close</Button></div>
-        {children}
+      <div
+        className="modal stack"
+        onClick={(e) => e.stopPropagation()}
+        style={
+          wide
+            ? {
+                maxWidth: 520,
+                width: 'min(520px, calc(100vw - 32px))',
+                maxHeight: 'min(88vh, 720px)',
+                overflow: 'hidden',
+              }
+            : undefined
+        }>
+        <div className="row between">
+          <h2 className="title">{title}</h2>
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+        <div style={wide ? { overflowY: 'auto', maxHeight: 'calc(88vh - 120px)', paddingRight: 4 } : undefined}>{children}</div>
       </div>
     </div>
   );
+  if (typeof document === 'undefined') return null;
+  return createPortal(node, document.body);
 }
 
 function Empty({ message }: { message: string }) {
@@ -6291,7 +6526,7 @@ function UpgradePlanModal({
     onClose();
   }
 
-  return (
+  const upgradeModalNode = (
     <div
       className="modal-backdrop upgrade-plan-backdrop"
       onClick={onClose}
@@ -6400,6 +6635,8 @@ function UpgradePlanModal({
       </div>
     </div>
   );
+  if (typeof document === 'undefined') return null;
+  return createPortal(upgradeModalNode, document.body);
 }
 
 function Toast({ message, onClose }: { message: string; onClose: () => void }) {

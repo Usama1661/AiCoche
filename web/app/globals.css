@@ -2667,11 +2667,9 @@ textarea.input {
 @keyframes pageEnter {
   from {
     opacity: 0;
-    transform: translateY(14px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -3096,6 +3094,108 @@ textarea.input {
   border-radius: var(--radius-xl);
   padding: 22px;
   box-shadow: var(--shadow-strong);
+}
+
+.modal-form-body {
+  gap: 14px;
+}
+
+.modal-form-footer {
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.button.modal-footer-cta {
+  width: auto;
+  min-width: min(280px, 100%);
+  max-width: 100%;
+  justify-content: center;
+  padding-inline: 32px;
+  box-shadow: 0 10px 26px color-mix(in srgb, var(--primary) 20%, transparent);
+}
+
+/* Personal AI voice picker — left-aligned copy; checkmark column so titles don’t shift */
+.voice-picker-modal-body {
+  text-align: left;
+}
+
+.voice-picker-modal-intro {
+  text-align: left;
+}
+
+.voice-picker-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.voice-picker-option {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--elevated) 72%, transparent), color-mix(in srgb, var(--card) 94%, transparent)),
+    var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+}
+
+.voice-picker-option--selected {
+  border-color: color-mix(in srgb, var(--primary) 65%, var(--border));
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.button.voice-picker-option__text {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+  gap: 6px;
+}
+
+.voice-picker-option__title.subtitle {
+  margin: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.voice-picker-option__tone-tag.caption {
+  margin: 0;
+  text-align: left;
+  width: 100%;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--primary) 88%, var(--text) 12%);
+}
+
+.voice-picker-option__check {
+  flex: 0 0 28px;
+  width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  font-weight: 950;
+  font-size: 15px;
+  color: var(--primary);
+  user-select: none;
 }
 
 @keyframes upgrade-plan-backdrop-in {
@@ -3609,6 +3709,58 @@ textarea.input {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.interview-topbar-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+  max-width: min(200px, 46vw);
+  text-align: right;
+}
+
+.interview-call-timer {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px 8px;
+  padding: 6px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  font-size: 12px;
+  font-weight: 850;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.interview-call-timer__label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+.interview-call-timer__value {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 950;
+  color: var(--text);
+}
+
+.interview-call-timer__sep {
+  opacity: 0.45;
+  font-weight: 700;
+}
+
+.interview-call-timer__q {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  color: var(--text);
 }
 
 .interview-chat-card {

@@ -5,6 +5,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { assistantVoicePreviewText, normalizeAssistantTtsVoice } from '@mobile/src/lib/assistantTtsVoice';
+
 /** Minimal typings — TS `dom` lib may omit experimental SpeechRecognition. */
 type WebSpeechRecognition = {
   lang: string;
@@ -19,14 +21,23 @@ type WebSpeechRecognition = {
   abort: () => void;
 };
 
+type WebSpeechRecognitionAlternative = {
+  transcript?: string;
+  /** 0–1 when provided; higher is more likely correct. */
+  confidence?: number;
+};
+
+type WebSpeechRecognitionResultItem = {
+  isFinal: boolean;
+  length: number;
+  [alt: number]: WebSpeechRecognitionAlternative;
+};
+
 type WebSpeechRecognitionResultEvent = {
   resultIndex: number;
   results: {
     length: number;
-    [index: number]: {
-      isFinal: boolean;
-      0?: { transcript?: string };
-    };
+    [index: number]: WebSpeechRecognitionResultItem;
   };
 };
 
@@ -124,6 +135,32 @@ export function cancelAllSpeech(): void {
   flushSpeechPlayback();
 }
 
+/**
+ * Fetch one neural TTS clip for the given voice and play it (voice picker demo).
+ * Stops any in-flight neural/browser speech first.
+ */
+export async function previewInterviewTtsVoice(
+  supabase: SupabaseClient,
+  voice: string,
+  text?: string
+): Promise<void> {
+  cancelAllSpeech();
+  const id = normalizeAssistantTtsVoice(voice);
+  const trimmed = (text ?? assistantVoicePreviewText(id)).trim().slice(0, 500);
+  if (!trimmed) return;
+  const { data, error } = await supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
+    body: { text: trimmed, voice: voice.trim() },
+  });
+  if (error || !data?.audioBase64) {
+    const msg =
+      error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string'
+        ? (error as { message: string }).message
+        : 'Preview unavailable. Sign in and try again.';
+    throw new Error(msg);
+  }
+  await playMp3Base64(data.audioBase64);
+}
+
 function playMp3Base64(b64: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
@@ -170,6 +207,8 @@ function playMp3Base64(b64: string): Promise<void> {
 export type SequentialSpeakOptions = {
   /** Pause between spoken segments (e.g. after feedback, before next question). Default ~800ms for neural. */
   pauseBetweenMs?: number;
+  /** OpenAI TTS voice id; sent to `interview-tts` (allowlisted server-side). */
+  voice?: string;
 };
 
 async function pauseInterruptible(myGen: number, ms: number): Promise<void> {
@@ -199,13 +238,16 @@ export async function speakSequentialHumanLike(
     return;
   }
   const pauseBetweenMs = opts?.pauseBetweenMs ?? 820;
+  const voice = opts?.voice?.trim() || undefined;
   speakGen += 1;
   const myGen = speakGen;
   flushSpeechPlayback();
 
+  const ttsBody = (segment: string) => (voice ? { text: segment, voice } : { text: segment });
+
   /** Start fetching the next clip while the current one plays so the following question isn’t blocked on TTS RTT. */
   let pendingFetch = supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
-    body: { text: cleaned[0] },
+    body: ttsBody(cleaned[0]),
   });
 
   for (let i = 0; i < cleaned.length; i += 1) {
@@ -225,7 +267,7 @@ export async function speakSequentialHumanLike(
     }
     if (i + 1 < cleaned.length) {
       pendingFetch = supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
-        body: { text: cleaned[i + 1] },
+        body: ttsBody(cleaned[i + 1]),
       });
     }
     try {
@@ -330,10 +372,59 @@ function speakSequentialAsync(texts: string[], myGen: number, pauseBetweenMs: nu
 
 export type RecognitionCallbacks = {
   onInterim?: (text: string) => void;
+  /** Called with each newly finalized segment (by phrase), not the full session text. */
   onFinal?: (text: string) => void;
   onEnd?: () => void;
   onError?: (message: string) => void;
 };
+
+/** Prefer the engine alternative with highest confidence when available (often better than [0] alone). */
+function pickBestAlternativeTranscript(result: WebSpeechRecognitionResultItem): string {
+  const n = typeof result.length === 'number' && result.length > 0 ? result.length : 1;
+  const first = result[0]?.transcript ?? '';
+  if (n <= 1) return first;
+
+  let best = first;
+  let bestConf = typeof result[0]?.confidence === 'number' ? result[0].confidence! : -1;
+
+  for (let a = 1; a < n; a += 1) {
+    const alt = result[a];
+    const piece = alt?.transcript ?? '';
+    if (!piece) continue;
+    const c = typeof alt.confidence === 'number' ? alt.confidence : -1;
+    if (c > bestConf) {
+      bestConf = c;
+      best = piece;
+    }
+  }
+  return best || first;
+}
+
+/**
+ * Full utterance text from the recognition results list.
+ * We always rebuild from `results[0..]` so finalized words persist across pauses; interim
+ * hypotheses only replace the trailing non-final segment (fixes “gap clears everything”).
+ */
+function fullTranscriptFromResults(
+  results: WebSpeechRecognitionResultEvent['results'],
+  resultIndex: number
+): { display: string; newFinalSlice: string } {
+  let committed = '';
+  let interim = '';
+  let newFinalSlice = '';
+  for (let i = 0; i < results.length; i += 1) {
+    const r = results[i];
+    const piece = pickBestAlternativeTranscript(r);
+    if (r.isFinal) {
+      committed += piece;
+      if (i >= resultIndex) newFinalSlice += piece;
+    } else {
+      interim += piece;
+    }
+  }
+  const display = (committed + interim).trim();
+  return { display, newFinalSlice: newFinalSlice.trim() };
+}
 
 /** Start continuous dictation; returns stop function. */
 export function startSpeechRecognition(lang: string, callbacks: RecognitionCallbacks): () => void {
@@ -352,19 +443,13 @@ export function startSpeechRecognition(lang: string, callbacks: RecognitionCallb
   recognition.lang = lang;
   recognition.continuous = true;
   recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
+  /** More alternatives → pick highest-confidence phrase when the engine offers them (Chromium). */
+  recognition.maxAlternatives = 5;
 
   recognition.onresult = (event: WebSpeechRecognitionResultEvent) => {
-    let interim = '';
-    let finalText = '';
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const piece = event.results[i][0]?.transcript ?? '';
-      if (event.results[i].isFinal) finalText += piece;
-      else interim += piece;
-    }
-    const combined = (finalText + interim).trim();
-    if (combined) callbacks.onInterim?.(combined);
-    if (finalText.trim()) callbacks.onFinal?.(finalText.trim());
+    const { display, newFinalSlice } = fullTranscriptFromResults(event.results, event.resultIndex);
+    if (display) callbacks.onInterim?.(display);
+    if (newFinalSlice) callbacks.onFinal?.(newFinalSlice);
   };
 
   recognition.onerror = (event: WebSpeechRecognitionErrorEvent) => {

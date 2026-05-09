@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
 
   try {
     await requireAuth(req);
-    const { text } = await readJson<{ text?: string }>(req);
+    const { text, voice } = await readJson<{ text?: string; voice?: string }>(req);
     const trimmed = (text ?? '').trim();
     if (!trimmed) {
       return jsonResponse({ error: 'text is required' }, 400);
@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'text too long (max 4096 characters)' }, 400);
     }
 
-    const mp3 = await synthesizeSpeechMp3(trimmed);
+    const mp3 = await synthesizeSpeechMp3(trimmed, typeof voice === 'string' ? voice : undefined);
     if (!mp3?.length) {
       return jsonResponse({ error: 'Speech synthesis unavailable' }, 503);
     }

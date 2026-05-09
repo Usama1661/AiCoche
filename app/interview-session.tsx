@@ -31,6 +31,18 @@ import { useUsageStore } from '@/src/store/usageStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { spacing } from '@/src/theme/tokens';
 
+/** Matches web mock interview session clock. */
+const INTERVIEW_QUESTION_CAP = 6;
+
+function formatInterviewElapsed(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
 function id() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -53,6 +65,9 @@ export default function InterviewSessionScreen() {
   const [waitingAnswer, setWaitingAnswer] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [historyStatus, setHistoryStatus] = useState<'active' | 'completed' | 'abandoned' | null>(null);
+  const [sessionClockEnded, setSessionClockEnded] = useState(false);
+  const [tick, setTick] = useState(0);
+  const sessionStartMsRef = useRef<number | null>(null);
   const listRef = useRef<FlatList>(null);
   const interviewSessionCreditRef = useRef(false);
   const historySessionId = typeof params.sessionId === 'string' ? params.sessionId : null;
@@ -61,6 +76,7 @@ export default function InterviewSessionScreen() {
 
   const boot = useCallback(async () => {
     if (isHistoryMode && historySessionId) {
+      setSessionClockEnded(true);
       setLoadingStart(true);
       setError(null);
       try {
@@ -103,6 +119,8 @@ export default function InterviewSessionScreen() {
         incrementChat();
       }
       setSessionId(res.sessionId);
+      setSessionClockEnded(false);
+      sessionStartMsRef.current = null;
       setMessages([
         {
           id: id(),
@@ -111,6 +129,7 @@ export default function InterviewSessionScreen() {
         },
       ]);
       setWaitingAnswer(true);
+      setSessionClockEnded(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start interview');
     } finally {
@@ -124,6 +143,20 @@ export default function InterviewSessionScreen() {
     startedRef.current = true;
     boot();
   }, [boot]);
+
+  useEffect(() => {
+    if (isHistoryMode) return;
+    if (messages.length === 0) return;
+    if (sessionStartMsRef.current === null) sessionStartMsRef.current = Date.now();
+  }, [isHistoryMode, messages.length]);
+
+  useEffect(() => {
+    if (isHistoryMode || sessionClockEnded) return;
+    if (sessionStartMsRef.current === null) return;
+    setTick(Date.now());
+    const id = setInterval(() => setTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isHistoryMode, sessionClockEnded, messages.length]);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -153,6 +186,10 @@ export default function InterviewSessionScreen() {
         status: res.finished ? 'completed' : 'active',
         feedback: res.feedback,
       }).catch(() => {});
+
+      if (!res.nextQuestion) {
+        setSessionClockEnded(true);
+      }
 
       setMessages((prev) => {
         const feedbackMsg: InterviewMessage = {
@@ -186,6 +223,13 @@ export default function InterviewSessionScreen() {
     }
   }, [input, sessionId, waitingAnswer, setLastInterviewScore]);
 
+  const userAnswerCount = messages.filter((m) => m.role === 'user').length;
+  const elapsedSec =
+    sessionStartMsRef.current !== null ? Math.max(0, Math.floor((tick - sessionStartMsRef.current) / 1000)) : 0;
+  const questionSlot = sessionClockEnded
+    ? INTERVIEW_QUESTION_CAP
+    : Math.min(INTERVIEW_QUESTION_CAP, userAnswerCount + 1);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
       <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.sm }}>
@@ -209,6 +253,18 @@ export default function InterviewSessionScreen() {
         ) : plan === 'free' ? (
           <AppText variant="caption" muted style={{ marginBottom: spacing.sm }}>
             Free: 3 mock interview sessions; each has 6 questions. Replies do not use extra sessions.
+          </AppText>
+        ) : null}
+        {!isHistoryMode && messages.length > 0 ? (
+          <AppText
+            variant="caption"
+            style={{
+              marginBottom: spacing.sm,
+              fontVariant: ['tabular-nums'],
+              color: colors.textSecondary,
+              fontWeight: '600',
+            }}>
+            Session {formatInterviewElapsed(elapsedSec)} · Q{questionSlot}/{INTERVIEW_QUESTION_CAP}
           </AppText>
         ) : null}
       </View>

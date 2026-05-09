@@ -288,8 +288,10 @@ export default function ProfileScreen() {
                 },
               ]}
             />
-            <Button title="Save" onPress={saveDraft} />
-            <Button title="Cancel" variant="ghost" onPress={() => setModal(null)} />
+            <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
+              <Button title="Save" onPress={saveDraft} style={styles.modalPrimaryCta} />
+              <Button title="Cancel" variant="ghost" onPress={() => setModal(null)} style={styles.modalGhostCta} />
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -334,8 +336,10 @@ export default function ProfileScreen() {
                 { color: colors.text, borderColor: colors.border, backgroundColor: colors.background },
               ]}
             />
-            <Button title="Save changes" onPress={saveProfileDetails} />
-            <Button title="Cancel" variant="ghost" onPress={() => setEditOpen(false)} />
+            <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
+              <Button title="Save changes" onPress={saveProfileDetails} style={styles.modalPrimaryCta} />
+              <Button title="Cancel" variant="ghost" onPress={() => setEditOpen(false)} style={styles.modalGhostCta} />
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -533,6 +537,19 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: spacing.lg,
     gap: spacing.md,
+  },
+  modalFooter: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+    alignSelf: 'stretch',
+  },
+  modalPrimaryCta: {
+    alignSelf: 'stretch',
+  },
+  modalGhostCta: {
+    alignSelf: 'stretch',
   },
   input: {
     borderWidth: 1,

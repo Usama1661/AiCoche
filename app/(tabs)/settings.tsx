@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Alert, StyleSheet, Switch, View } from 'react-native';
+
+import { AssistantVoicePickerModal } from '@/src/components/settings/AssistantVoicePickerModal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 
@@ -7,6 +9,8 @@ import { AppText } from '@/src/components/ui/AppText';
 import { HapticPressable as Pressable } from '@/src/components/ui/HapticPressable';
 import { Screen } from '@/src/components/ui/Screen';
 import { triggerLightHaptic } from '@/src/lib/haptics';
+import { ASSISTANT_TTS_VOICE_OPTIONS } from '@/src/lib/assistantTtsVoice';
+import { useAssistantVoiceStore } from '@/src/store/assistantVoiceStore';
 import { useSessionStore } from '@/src/store/sessionStore';
 import { useAppTheme } from '@/src/theme/ThemeProvider';
 import { radii, spacing } from '@/src/theme/tokens';
@@ -25,7 +29,10 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { colors, isDark, setPreference } = useAppTheme();
   const logout = useSessionStore((s) => s.logout);
+  const assistantVoiceId = useAssistantVoiceStore((s) => s.voiceId);
+  const voiceLabel = ASSISTANT_TTS_VOICE_OPTIONS.find((o) => o.id === assistantVoiceId)?.assistantName ?? assistantVoiceId;
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [voiceModalVisible, setVoiceModalVisible] = useState(false);
 
   async function signOut() {
     try {
@@ -82,12 +89,14 @@ export default function SettingsScreen() {
           }}
         />
         <SettingsRow
-          icon="calendar-outline"
-          label="Calendar Settings"
-          color={colors.textMuted}
-          onPress={() => Alert.alert('Calendar Settings', 'Calendar integrations are coming soon.')}
+          icon="mic-outline"
+          label={`Personal AI assistant voice (${voiceLabel})`}
+          color={colors.primary}
+          onPress={() => setVoiceModalVisible(true)}
         />
       </SettingsSection>
+
+      <AssistantVoicePickerModal visible={voiceModalVisible} onClose={() => setVoiceModalVisible(false)} />
 
       <SettingsSection title="Account">
         <SettingsRow
