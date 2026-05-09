@@ -1,0 +1,12 @@
+# Next.js on Netlify — needs this plugin (do not treat `.next` as plain static files).
+# Git: set site "Base directory" to `web`. CLI: run commands from `web/`.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

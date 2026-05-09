@@ -14,3 +14,5 @@ web/.next
 web/node_modules
 web/tsconfig.tsbuildinfo
 *.tsbuildinfo
+# Local Netlify folder
+.netlify
