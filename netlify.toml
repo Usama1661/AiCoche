@@ -1,0 +1,12 @@
+# Monorepo: set Netlify UI "Base directory" to `web` (do not also use [build].base here — avoids web/web).
+# Optional: clear "Functions directory" in the UI; @netlify/plugin-nextjs still bundles the Next handler.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
