@@ -9,6 +9,7 @@ import {
 import { continueNextQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
+  interviewPromptStyle,
   professionTitle,
   readInterviewMetrics,
   stripInternalInterviewFields,
@@ -123,6 +124,7 @@ Deno.serve(async (req) => {
 
     const profile = row.profile as Record<string, unknown>;
     const metricsSnapshot = readInterviewMetrics(profile);
+    const promptStyle = interviewPromptStyle(profile);
     const messages: Msg[] = Array.isArray(row.messages) ? [...(row.messages as Msg[])] : [];
     const tentativeTurn = Number(row.turn_count) + 1;
 
@@ -182,7 +184,7 @@ Rules:
 - The delimiter line must be exactly ${SPLIT} with no spaces before or after.
 - To end the interview after this turn with no follow-up question, output ${SPLIT} on its own line, then a second line with only NONE.
 
-${continueNextQuestionPolicyBlock(profession, tentativeTurn)}`,
+${continueNextQuestionPolicyBlock(profession, tentativeTurn, promptStyle)}`,
           },
           { role: 'user' as const, content: userPrompt },
         ];

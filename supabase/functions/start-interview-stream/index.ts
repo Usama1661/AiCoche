@@ -2,6 +2,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { firstQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
+import type { InterviewPromptStyle } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
   experienceLabel,
@@ -13,6 +14,10 @@ import { chatCompletionTextStream } from '../_shared/openai.ts';
 import { isResponse, requireAuth } from '../_shared/supabase.ts';
 
 type UserProfile = Record<string, unknown>;
+
+function text(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 function sseLine(obj: unknown): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`);
@@ -34,6 +39,9 @@ Deno.serve(async (req) => {
     const body = (await req.json()) as {
       profile?: UserProfile;
       metrics?: Record<string, unknown> | null;
+      /** Voice mock interview only — enables Normal / Advanced question mix in prompts. */
+      voiceInterview?: boolean;
+      interviewLevel?: string;
     };
     const { profile, metrics } = body;
     if (!profile || typeof profile !== 'object') {
@@ -47,17 +55,33 @@ Deno.serve(async (req) => {
     const contextBlock = buildInterviewContextLines(profile, metrics ?? null);
     const expDesc = experienceLabel(profile.experience);
 
+    const voiceInterview = body.voiceInterview === true;
+    const level = text(body.interviewLevel).toLowerCase() === 'advanced' ? 'advanced' : 'normal';
+    const promptStyle: InterviewPromptStyle = voiceInterview
+      ? level === 'advanced'
+        ? 'voice_advanced'
+        : 'voice_normal'
+      : 'typed';
+
     const defaultQuestion =
       `To start us off — how did you get interested in ${profession}, and which part of your background from your profile best reflects where you want to go next?`;
+
+    const modeHint =
+      promptStyle === 'voice_advanced'
+        ? 'Voice interview · Advanced depth'
+        : promptStyle === 'voice_normal'
+          ? 'Voice interview · Normal (realistic hiring mix)'
+          : 'Typed chat interview';
 
     const system = `You are an expert hiring manager running a realistic mock interview for this ONE candidate.
 
 Target role / field: ${profession}
+Session mode: ${modeHint}
 
 Stream ONLY the first interview question as plain text — one continuous question the interviewer would ask aloud.
 No JSON. No preamble like "Here is the question:" or labels. No quotation marks wrapping the whole question.
 
-${firstQuestionPolicyBlock(profession, expDesc)}
+${firstQuestionPolicyBlock(profession, expDesc, promptStyle)}
 
 Candidate context (use this):
 ---
@@ -77,6 +101,7 @@ ${contextBlock}
     const storedProfile = {
       ...profile,
       [INTERVIEW_METRICS_KEY]: metrics ?? {},
+      ...(voiceInterview ? { voiceInterviewLevel: level } : {}),
     };
 
     const stream = new ReadableStream<Uint8Array>({

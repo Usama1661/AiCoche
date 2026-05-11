@@ -45,6 +45,8 @@ type View =
   | 'help-support';
 
 type Experience = 'beginner' | 'intermediate' | 'experienced';
+/** Voice mock interview only — typed chat always uses classic prompts server-side. */
+type VoiceInterviewLevel = 'normal' | 'advanced';
 type Goal = 'job' | 'switch' | 'freelance' | 'skills';
 type Gender = 'male' | 'female';
 
@@ -495,6 +497,83 @@ function normalizeInterviewMessages(value: unknown): Message[] {
   });
 }
 
+const GENERIC_INTERVIEW_SESSION_TITLES = new Set(
+  ['mock interview practice', 'interview practice', 'aicoche interview'].map((t) => t.toLowerCase()),
+);
+
+function mergeInterviewHistoryDuplicates(a: InterviewHistoryItem, b: InterviewHistoryItem): InterviewHistoryItem {
+  const rank = (s: InterviewHistoryItem) => {
+    let r = 0;
+    if (s.status === 'completed') r += 400;
+    else if (s.status === 'abandoned') r += 200;
+    r += s.messages.length * 20;
+    r += s.turnCount * 15;
+    r += new Date(s.updatedAt).getTime() / 1e9;
+    return r;
+  };
+  const primary = rank(b) > rank(a) ? b : a;
+  const secondary = primary === b ? a : b;
+  const primaryTitle = primary.title.trim().toLowerCase();
+  const secondaryTitle = secondary.title.trim().toLowerCase();
+  const title =
+    primaryTitle && !GENERIC_INTERVIEW_SESSION_TITLES.has(primaryTitle)
+      ? primary.title
+      : secondaryTitle && !GENERIC_INTERVIEW_SESSION_TITLES.has(secondaryTitle)
+        ? secondary.title
+        : primary.title || secondary.title;
+
+  const userMsgs = (s: InterviewHistoryItem) => s.messages.filter((m) => m.role === 'user').length;
+  const messages =
+    userMsgs(primary) > userMsgs(secondary) || primary.messages.length >= secondary.messages.length
+      ? primary.messages
+      : secondary.messages;
+
+  const mergedUserCount = messages.filter((m) => m.role === 'user').length;
+
+  const updatedAt =
+    new Date(primary.updatedAt).getTime() >= new Date(secondary.updatedAt).getTime()
+      ? primary.updatedAt
+      : secondary.updatedAt;
+
+  const status: InterviewHistoryItem['status'] =
+    primary.status === 'completed' || secondary.status === 'completed'
+      ? 'completed'
+      : primary.status === 'abandoned' || secondary.status === 'abandoned'
+        ? 'abandoned'
+        : 'active';
+
+  return {
+    ...primary,
+    title,
+    messages,
+    turnCount: Math.max(primary.turnCount, secondary.turnCount, mergedUserCount),
+    score: primary.score ?? secondary.score,
+    updatedAt,
+    status,
+    createdAt:
+      new Date(primary.createdAt).getTime() <= new Date(secondary.createdAt).getTime()
+        ? primary.createdAt
+        : secondary.createdAt,
+  };
+}
+
+
+/** Same interview row often exists both in Supabase and localStorage — merge by id instead of listing twice. */
+function dedupeInterviewSessionsById(sessions: InterviewHistoryItem[]): InterviewHistoryItem[] {
+  const map = new Map<string, InterviewHistoryItem>();
+  for (const s of sessions) {
+    const id = s.id.trim();
+    if (!id) continue;
+    const prev = map.get(id);
+    map.set(id, prev ? mergeInterviewHistoryDuplicates(prev, s) : s);
+  }
+  return Array.from(map.values());
+}
+
+function sortInterviewSessionsLatestFirst(sessions: InterviewHistoryItem[]): InterviewHistoryItem[] {
+  return [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
 function normalizeInterviewHistory(value: unknown): InterviewHistoryItem[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -532,7 +611,7 @@ function normalizeInterviewHistory(value: unknown): InterviewHistoryItem[] {
 
 function upsertInterviewHistory(current: InterviewHistoryItem[], item: InterviewHistoryItem): InterviewHistoryItem[] {
   const next = [item, ...current.filter((session) => session.id !== item.id)];
-  return normalizeInterviewHistory(next).slice(0, 12);
+  return sortInterviewSessionsLatestFirst(dedupeInterviewSessionsById(normalizeInterviewHistory(next))).slice(0, 12);
 }
 
 function displayNameFor(user: User | null) {
@@ -569,6 +648,10 @@ function isGoal(value: unknown): value is Goal {
 
 function isGender(value: unknown): value is Gender {
   return value === 'male' || value === 'female';
+}
+
+function normalizeVoiceInterviewLevel(value: unknown): VoiceInterviewLevel {
+  return value === 'advanced' ? 'advanced' : 'normal';
 }
 
 function stringList(value: unknown): string[] {
@@ -1082,6 +1165,9 @@ export default function WebApp() {
   const [error, setError] = useState('');
   const [upgradeModalVariant, setUpgradeModalVariant] = useState<'interview' | 'cv' | null>(null);
   const [assistantTtsVoice, setAssistantTtsVoice] = useState<AssistantTtsVoiceId>(DEFAULT_ASSISTANT_TTS_VOICE);
+  const [voiceInterviewLevel, setVoiceInterviewLevel] = useState<VoiceInterviewLevel>(() =>
+    normalizeVoiceInterviewLevel(storageGet<string>('aicoche-web-voice-interview-level', 'normal')),
+  );
   const remoteProfileLoadedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1090,10 +1176,15 @@ export default function WebApp() {
     setMetrics(storageGet<MetricsState>('aicoche-web-metrics', initialMetrics));
     setUsage(storageGet<UsageState>('aicoche-web-usage', { plan: 'free', chatsUsed: 0, cvAnalysesUsed: 0 }));
     setReminders(normalizeReminders(storageGet<unknown>('aicoche-web-reminders', [])));
-    setInterviewSessions(normalizeInterviewHistory(storageGet<unknown>('aicoche-web-interview-sessions', [])));
+    setInterviewSessions(
+      sortInterviewSessionsLatestFirst(
+        dedupeInterviewSessionsById(normalizeInterviewHistory(storageGet<unknown>('aicoche-web-interview-sessions', []))),
+      ).slice(0, 12),
+    );
     setAssistantTtsVoice(
       normalizeAssistantTtsVoice(storageGet<string>('aicoche-web-assistant-tts-voice', DEFAULT_ASSISTANT_TTS_VOICE))
     );
+    setVoiceInterviewLevel(normalizeVoiceInterviewLevel(storageGet<string>('aicoche-web-voice-interview-level', 'normal')));
 
     supabase?.auth.getUser().then(({ data }) => {
       const authUser = data.user ?? null;
@@ -1128,6 +1219,7 @@ export default function WebApp() {
   useEffect(() => storageSet('aicoche-web-reminders', reminders), [reminders]);
   useEffect(() => storageSet('aicoche-web-interview-sessions', interviewSessions), [interviewSessions]);
   useEffect(() => storageSet('aicoche-web-assistant-tts-voice', assistantTtsVoice), [assistantTtsVoice]);
+  useEffect(() => storageSet('aicoche-web-voice-interview-level', voiceInterviewLevel), [voiceInterviewLevel]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1156,7 +1248,10 @@ export default function WebApp() {
       });
     fetchRemoteInterviewSessions()
       .then((sessions) => {
-        if (sessions.length) setInterviewSessions((current) => normalizeInterviewHistory([...sessions, ...current]).slice(0, 12));
+        if (!sessions.length) return;
+        setInterviewSessions((current) =>
+          sortInterviewSessionsLatestFirst(dedupeInterviewSessionsById([...sessions, ...current])).slice(0, 12),
+        );
       })
       .catch(() => {
         // Local interview sessions are still useful if remote history is unavailable.
@@ -1202,6 +1297,8 @@ export default function WebApp() {
     openUpgradeModal: (variant: 'interview' | 'cv') => setUpgradeModalVariant(variant),
     assistantTtsVoice,
     setAssistantTtsVoice,
+    voiceInterviewLevel,
+    setVoiceInterviewLevel,
   };
 
   if (!hydrated) {
@@ -1291,6 +1388,9 @@ type CommonProps = {
   openUpgradeModal?: (variant: 'interview' | 'cv') => void;
   assistantTtsVoice: AssistantTtsVoiceId;
   setAssistantTtsVoice: React.Dispatch<React.SetStateAction<AssistantTtsVoiceId>>;
+  /** Voice mock interview difficulty only (typed chat ignores this). */
+  voiceInterviewLevel: VoiceInterviewLevel;
+  setVoiceInterviewLevel: React.Dispatch<React.SetStateAction<VoiceInterviewLevel>>;
 };
 
 function Loading({ theme }: { theme: Theme }) {
@@ -2746,6 +2846,8 @@ function InterviewTab({
   setSelectedInterviewSessionId,
   setView,
   openUpgradeModal,
+  voiceInterviewLevel,
+  setVoiceInterviewLevel,
 }: CommonProps) {
   const now = Date.now();
   const reminderList = normalizeReminders(reminders);
@@ -2796,9 +2898,35 @@ function InterviewTab({
 
   return (
     <section className="screen stack">
-      <div>
-        <h1 className="display">Mock Interviews</h1>
-        <p className="body muted">Practice with AI and improve your skills</p>
+      <div className="interview-mock-page-header">
+        <div className="interview-mock-page-header__lead">
+          <h1 className="display">Mock Interviews</h1>
+          <p className="body muted">Practice with AI and improve your skills</p>
+        </div>
+        <div className="interview-mock-page-header__toolbar">
+          <p className="interview-mock-page-header__toolbar-label">Interview difficulty</p>
+          <div
+            className="interview-voice-level-segment interview-voice-level-segment--compact"
+            role="radiogroup"
+            aria-label="Interview difficulty">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={voiceInterviewLevel === 'normal'}
+              className="interview-voice-level-segment__btn"
+              onClick={() => setVoiceInterviewLevel('normal')}>
+              Normal
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={voiceInterviewLevel === 'advanced'}
+              className="interview-voice-level-segment__btn"
+              onClick={() => setVoiceInterviewLevel('advanced')}>
+              Advanced
+            </button>
+          </div>
+        </div>
       </div>
       <button className="hero-card row" onClick={tryStartTypedInterview} style={{ textAlign: 'left', cursor: 'pointer' }}>
         <div className="icon-box" style={{ color: 'white' }}>◌</div>
@@ -2807,17 +2935,23 @@ function InterviewTab({
           <p className="body muted">AI-powered {profile.professionLabel || 'career'} interview</p>
         </div>
       </button>
-      <button
-        className="hero-card row"
-        type="button"
-        onClick={tryStartVoiceInterview}
-        style={{ textAlign: 'left', cursor: 'pointer', borderStyle: 'dashed' }}>
-        <div className="icon-box" style={{ color: 'white', background: 'color-mix(in srgb, var(--primary) 55%, var(--elevated))' }}>🎙</div>
-        <div>
-          <h2 className="subtitle">Voice mock interview</h2>
-          <p className="body muted">Speak your answers; AiCoche reads questions aloud (beta · Chrome / Edge)</p>
-        </div>
-      </button>
+      <div className="hero-card interview-voice-entry-card" style={{ borderStyle: 'dashed' }}>
+        <button type="button" className="interview-voice-entry-card__launch" onClick={tryStartVoiceInterview}>
+          <div
+            className="icon-box"
+            style={{ color: 'white', background: 'color-mix(in srgb, var(--primary) 55%, var(--elevated))', flexShrink: 0 }}>
+            🎙
+          </div>
+          <div className="stack" style={{ gap: 8, flex: 1, minWidth: 0 }}>
+            <h2 className="subtitle" style={{ margin: 0 }}>
+              Voice mock interview
+            </h2>
+            <p className="body muted" style={{ margin: 0 }}>
+              Tap here to start · spoken answers and neural voice (beta · Chrome / Edge). Typed chat above is unchanged.
+            </p>
+          </div>
+        </button>
+      </div>
       <div className="card row between">
         <div className="row">
           <div className="icon-box" style={{ color: 'var(--gold)', background: 'var(--warning-tint)' }}>⏰</div>
@@ -2976,7 +3110,75 @@ function clearProjectBatchCache(userId: string) {
   }
 }
 
-function Quiz({ profile, metrics, setMetrics, setView }: CommonProps) {
+/** Persist AI-generated quiz payloads so leaving / revisiting the Quiz tab does not refetch. */
+type QuizAiCachePayload = {
+  v: 1;
+  fingerprint: string;
+  entries: Record<string, { quizSessionId: string | null; questions: QuizQuestion[] }>;
+};
+
+function quizAiCacheStorageKey(userId: string | null) {
+  return userId ? `aicoche-web-quiz-ai:${userId}` : 'aicoche-web-quiz-ai:local';
+}
+
+function readQuizAiCachePayload(userId: string | null): QuizAiCachePayload | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(quizAiCacheStorageKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as QuizAiCachePayload;
+    if (parsed.v !== 1 || typeof parsed.fingerprint !== 'string' || !parsed.entries || typeof parsed.entries !== 'object') {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function readQuizAiCacheEntry(userId: string | null, fingerprint: string, quizIndex: number) {
+  const payload = readQuizAiCachePayload(userId);
+  if (!payload || payload.fingerprint !== fingerprint) return null;
+  const entry = payload.entries[String(quizIndex)];
+  if (!entry?.questions?.length) return null;
+  return entry;
+}
+
+function writeQuizAiCacheEntry(
+  userId: string | null,
+  fingerprint: string,
+  quizIndex: number,
+  entry: { quizSessionId: string | null; questions: QuizQuestion[] },
+) {
+  const prev = readQuizAiCachePayload(userId);
+  const next: QuizAiCachePayload =
+    prev && prev.fingerprint === fingerprint ? prev : { v: 1, fingerprint, entries: {} };
+  next.fingerprint = fingerprint;
+  next.entries[String(quizIndex)] = entry;
+  storageSet(quizAiCacheStorageKey(userId), next);
+}
+
+/** Stable fingerprint for inputs that affect `generate-quiz` (avoids refetch on unrelated renders). */
+function computeQuizAiFingerprint(profile: ProfileState, metrics: MetricsState, quizIndex: number): string {
+  const skillPool = compactSkills([
+    ...profile.skills,
+    ...profile.tools,
+    ...profile.professionalProfile.technicalSkills,
+    ...(metrics.lastAnalysis?.missingSkills ?? []),
+  ])
+    .slice(0, 12)
+    .sort((a, b) => a.localeCompare(b));
+  return JSON.stringify({
+    qi: quizIndex,
+    topic: profile.professionLabel || profile.professionalProfile.currentDesignation || '',
+    difficulty: profile.experience ?? 'intermediate',
+    skills: skillPool,
+    cvScore: metrics.lastCvScore ?? null,
+    analysisOverall: metrics.lastAnalysis?.overallScore ?? null,
+  });
+}
+
+function Quiz({ user, profile, metrics, setMetrics, setView }: CommonProps) {
   const fallbackQuestions = useMemo(() => buildQuiz(profile, 0), [profile]);
   const [questions, setQuestions] = useState<QuizQuestion[]>(fallbackQuestions);
   const [quizIndex, setQuizIndex] = useState(0);
@@ -2992,6 +3194,22 @@ function Quiz({ profile, metrics, setMetrics, setView }: CommonProps) {
   const quizScores = normalizedQuizScores(metrics);
   const currentOverall = overallQuizScore(quizScores);
 
+  const quizAiFingerprint = useMemo(
+    () => computeQuizAiFingerprint(profile, metrics, quizIndex),
+    [
+      quizIndex,
+      profile.professionLabel,
+      profile.professionalProfile.currentDesignation,
+      profile.experience,
+      profile.skills.join('\u0001'),
+      profile.tools.join('\u0001'),
+      profile.professionalProfile.technicalSkills.join('\u0001'),
+      metrics.lastCvScore,
+      (metrics.lastAnalysis?.missingSkills ?? []).join('\u0001'),
+      metrics.lastAnalysis?.overallScore ?? null,
+    ],
+  );
+
   useEffect(() => {
     let active = true;
     if (!hasCvAnalysisMetrics(metrics)) {
@@ -3004,6 +3222,25 @@ function Quiz({ profile, metrics, setMetrics, setView }: CommonProps) {
       };
     }
     const fallback = buildQuiz(profile, quizIndex);
+    const cacheUserId = user?.id ?? null;
+
+    if (quizRefreshKey === 0) {
+      const cached = readQuizAiCacheEntry(cacheUserId, quizAiFingerprint, quizIndex);
+      if (cached?.questions?.length) {
+        setQuestions(normalizeQuizQuestions(cached.questions, fallback));
+        setQuizSessionId(cached.quizSessionId ?? null);
+        setCurrentIndex(0);
+        setSelectedIndex(null);
+        setAnswers([]);
+        setResult(null);
+        setQuizNotice('');
+        setLoadingQuiz(false);
+        return () => {
+          active = false;
+        };
+      }
+    }
+
     setLoadingQuiz(true);
     setQuestions([]);
     setQuizSessionId(null);
@@ -3032,40 +3269,55 @@ function Quiz({ profile, metrics, setMetrics, setView }: CommonProps) {
       ...(metrics.lastAnalysis?.missingSkills ?? []),
     ]).slice(0, 12);
 
-    supabase.functions.invoke<GenerateQuizResponse>('generate-quiz', {
-      body: {
-        topic: profile.professionLabel || profile.professionalProfile.currentDesignation || 'career readiness',
-        difficulty: profile.experience ?? 'intermediate',
-        skills: skillPool,
-        count: 6,
-        quizNumber: quizIndex + 1,
-        profile: buildUserProfile(profile),
-        metrics: buildProjectMetricsSnapshot(metrics),
-      },
-    }).then(({ data, error }) => {
-      if (!active) return;
-      if (error || data?.error) {
-        console.warn('AI quiz generation failed; using local fallback.', error ?? data?.error);
+    supabase.functions
+      .invoke<GenerateQuizResponse>('generate-quiz', {
+        body: {
+          topic: profile.professionLabel || profile.professionalProfile.currentDesignation || 'career readiness',
+          difficulty: profile.experience ?? 'intermediate',
+          skills: skillPool,
+          count: 6,
+          quizNumber: quizIndex + 1,
+          profile: buildUserProfile(profile),
+          metrics: buildProjectMetricsSnapshot(metrics),
+        },
+      })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error || data?.error) {
+          console.warn('AI quiz generation failed; using local fallback.', error ?? data?.error);
+          setQuestions(fallback);
+          setQuizNotice(
+            'AI quiz is unavailable right now. Deploy or retry the generate-quiz function to load fresh AI questions.',
+          );
+          return;
+        }
+        const normalized = normalizeQuizQuestions(data?.questions, fallback);
+        setQuizSessionId(data?.quizSessionId ?? null);
+        setQuestions(normalized);
+        setQuizNotice('');
+        writeQuizAiCacheEntry(cacheUserId, quizAiFingerprint, quizIndex, {
+          quizSessionId: data?.quizSessionId ?? null,
+          questions: normalized,
+        });
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.warn('AI quiz generation failed; using local fallback.', error);
         setQuestions(fallback);
-        setQuizNotice('AI quiz is unavailable right now. Deploy or retry the generate-quiz function to load fresh AI questions.');
-        return;
-      }
-      setQuizSessionId(data?.quizSessionId ?? null);
-      setQuestions(normalizeQuizQuestions(data?.questions, fallback));
-      setQuizNotice('');
-    }).catch((error) => {
-      if (!active) return;
-      console.warn('AI quiz generation failed; using local fallback.', error);
-      setQuestions(fallback);
-      setQuizNotice('AI quiz is unavailable right now. Deploy or retry the generate-quiz function to load fresh AI questions.');
-    }).finally(() => {
-      if (active) setLoadingQuiz(false);
-    });
+        setQuizNotice(
+          'AI quiz is unavailable right now. Deploy or retry the generate-quiz function to load fresh AI questions.',
+        );
+      })
+      .finally(() => {
+        if (active) setLoadingQuiz(false);
+      });
 
     return () => {
       active = false;
     };
-  }, [profile, quizIndex, quizRefreshKey, metrics.lastAnalysis, metrics.lastCvScore]);
+    /* `quizAiFingerprint` reflects profile/CV inputs sent to `generate-quiz`; omit profile/metrics deps to avoid refetch on reference churn. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizAiFingerprint, quizIndex, quizRefreshKey, user?.id]);
 
   async function submit() {
     if (selectedIndex == null) return;
@@ -4059,6 +4311,7 @@ function VoiceInterviewSession({
   setError,
   openUpgradeModal,
   assistantTtsVoice,
+  voiceInterviewLevel,
 }: CommonProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState('');
@@ -4214,6 +4467,8 @@ function VoiceInterviewSession({
                 accessToken: token,
                 profile: buildUserProfile(profile),
                 metrics: buildProjectMetricsSnapshot(metrics),
+                voiceInterview: true,
+                interviewLevel: voiceInterviewLevel,
                 onDelta: (c) => {
                   if (firstDelta) {
                     firstDelta = false;
@@ -4329,8 +4584,8 @@ function VoiceInterviewSession({
       }
     }
     void start();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cvReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- voiceInterviewLevel must refresh session style when changed before opening voice tab
+  }, [cvReady, voiceInterviewLevel]);
 
   useEffect(() => {
     voiceCallActiveRef.current = true;
@@ -4343,6 +4598,7 @@ function VoiceInterviewSession({
   }, []);
 
   const voiceStreamLive = voiceStreamReply.length > 0;
+  const voiceLevelLabel = voiceInterviewLevel === 'advanced' ? 'Advanced' : 'Normal';
   const voiceStatusLabel = sessionEnded
     ? 'Session complete'
     : reflecting
@@ -4631,8 +4887,8 @@ function VoiceInterviewSession({
           title="AI voice interview"
           subtitle={
             hasSupabase && user
-              ? 'Natural voice · quiet room & headphones recommended'
-              : 'Sign in for neural speech · browser voice otherwise'
+              ? `${voiceLevelLabel} mode · natural voice · quiet room & headphones recommended`
+              : `${voiceLevelLabel} mode · sign in for neural speech · browser voice otherwise`
           }
           onBack={() => {
             voiceCallActiveRef.current = false;

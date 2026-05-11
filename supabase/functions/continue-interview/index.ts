@@ -9,6 +9,7 @@ import {
 import { continueNextQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
+  interviewPromptStyle,
   professionTitle,
   readInterviewMetrics,
   stripInternalInterviewFields,
@@ -52,6 +53,7 @@ Deno.serve(async (req) => {
 
     const profile = row.profile as Record<string, unknown>;
     const metricsSnapshot = readInterviewMetrics(profile);
+    const promptStyle = interviewPromptStyle(profile);
     const messages: Msg[] = Array.isArray(row.messages) ? [...(row.messages as Msg[])] : [];
     const tentativeTurn = Number(row.turn_count) + 1;
 
@@ -155,7 +157,7 @@ Rules for nextQuestion:
 - Build on the transcript: reference what they actually said; then probe appropriately for the phase below.
 - One concise question only. Use finished true with nextQuestion null only when ending early or when the interview has run its course.
 
-${continueNextQuestionPolicyBlock(profession, tentativeTurn)}`;
+${continueNextQuestionPolicyBlock(profession, tentativeTurn, promptStyle)}`;
 
       const transcript = messages
         .map((m) => `${m.role === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`)

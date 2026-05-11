@@ -1,5 +1,7 @@
 /** Human-readable context for interview prompts (profile + optional metrics). */
 
+import type { InterviewPromptStyle } from './interviewQuestionPolicy.ts';
+
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -84,12 +86,22 @@ export function professionTitle(profile: Record<string, unknown>): string {
   );
 }
 
+/** Resolve prompt style from session profile (voice sessions set voiceInterviewLevel). */
+export function interviewPromptStyle(profile: Record<string, unknown>): InterviewPromptStyle {
+  const raw = (text(profile.voiceInterviewLevel) || text(profile.voice_interview_level)).toLowerCase();
+  if (raw === 'advanced') return 'voice_advanced';
+  if (raw === 'normal') return 'voice_normal';
+  return 'typed';
+}
+
 /** Stored on session with profile; used only for prompting follow-up questions */
 export const INTERVIEW_METRICS_KEY = '_aicocheInterviewMetrics';
 
 export function stripInternalInterviewFields(profile: Record<string, unknown>): Record<string, unknown> {
   const copy = { ...profile };
   delete copy[INTERVIEW_METRICS_KEY];
+  delete copy.voiceInterviewLevel;
+  delete copy.voice_interview_level;
   return copy;
 }
 

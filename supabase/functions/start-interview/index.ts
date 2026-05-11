@@ -44,7 +44,7 @@ Target role / field: ${profession}
 Your task: produce ONLY valid JSON:
 {"question":"..."}
 
-${firstQuestionPolicyBlock(profession, expDesc)}
+${firstQuestionPolicyBlock(profession, expDesc, 'typed')}
 
 Candidate context (use this):
 ---

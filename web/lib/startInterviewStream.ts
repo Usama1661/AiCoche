@@ -19,6 +19,9 @@ export async function consumeStartInterviewStream(options: {
   accessToken: string;
   profile: Record<string, unknown>;
   metrics: Record<string, unknown> | null;
+  /** Voice mock interview only — omit for typed chat (server uses classic CV-first prompts). */
+  voiceInterview?: boolean;
+  interviewLevel?: 'normal' | 'advanced';
   onDelta: (chunk: string) => void;
   /** After the session row is created — use to begin TTS or finalize UI before `done`. */
   onSpeakReady?: (payload: { sessionId: string; question: string }) => void;
@@ -31,7 +34,13 @@ export async function consumeStartInterviewStream(options: {
       apikey: options.anonKey,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ profile: options.profile, metrics: options.metrics }),
+    body: JSON.stringify({
+      profile: options.profile,
+      metrics: options.metrics,
+      ...(options.voiceInterview
+        ? { voiceInterview: true, interviewLevel: options.interviewLevel ?? 'normal' }
+        : {}),
+    }),
   });
 
   if (!res.ok || !res.body) {

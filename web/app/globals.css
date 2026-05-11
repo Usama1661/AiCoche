@@ -267,6 +267,152 @@ button.card:hover,
     linear-gradient(135deg, #ffffff, #f7f9ff 58%, #eef4ff);
 }
 
+/* Mock Interviews tab: page title + interview difficulty (toolbar) — no card chrome */
+.interview-mock-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px 24px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.interview-mock-page-header__lead {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.interview-mock-page-header__toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.interview-mock-page-header__toolbar-label {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+@media (max-width: 560px) {
+  .interview-mock-page-header__toolbar {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .interview-mock-page-header .interview-voice-level-segment--compact {
+    max-width: none;
+    width: 100%;
+  }
+}
+
+/* Voice interview: difficulty segmented control (mock interviews tab) */
+.interview-voice-entry-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+}
+
+.interview-voice-entry-card__launch {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
+  padding: 24px;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  transition: background 0.18s ease;
+}
+
+.interview-voice-entry-card__launch:hover {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.interview-voice-entry-card__launch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.interview-voice-level-segment--compact {
+  width: auto;
+  max-width: 220px;
+}
+
+.interview-voice-level-segment--compact .interview-voice-level-segment__btn {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 0.8125rem;
+}
+
+.interview-voice-level-segment {
+  display: flex;
+  width: 100%;
+  max-width: 360px;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid var(--border);
+  gap: 4px;
+}
+
+[data-theme='light'] .interview-voice-level-segment {
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.interview-voice-level-segment__btn {
+  flex: 1;
+  min-height: 44px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 11px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: transparent;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.interview-voice-level-segment__btn:hover:not([aria-checked='true']) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.interview-voice-level-segment__btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.interview-voice-level-segment__btn[aria-checked='true'] {
+  color: var(--text-inverse);
+  background: linear-gradient(135deg, var(--primary-strong), var(--primary-dark));
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+[data-theme='light'] .interview-voice-level-segment__btn[aria-checked='true'] {
+  color: #fff;
+}
+
 [data-theme='light'] .card,
 [data-theme='light'] .hero-card,
 [data-theme='light'] .dashboard-profile-card,
