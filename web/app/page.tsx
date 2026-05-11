@@ -15,6 +15,11 @@ import {
   startSpeechRecognition,
 } from '@/lib/voiceWeb';
 import {
+  playInterviewHangUpSound,
+  playInterviewSessionCompleteSound,
+  playInterviewSessionStartSound,
+} from '@/lib/voiceInterviewSounds';
+import {
   ASSISTANT_TTS_VOICE_OPTIONS,
   DEFAULT_ASSISTANT_TTS_VOICE,
   type AssistantTtsVoiceId,
@@ -4094,6 +4099,8 @@ function VoiceInterviewSession({
   const voiceTtsChainRef = useRef(Promise.resolve());
   /** Server sent `ready` and we already queued post-stream TTS (avoids double-speak on old clients). */
   const voiceSpeakReadyTtsRef = useRef(false);
+  /** False after hang-up or unmount — blocks queued `speakAsInterviewer` chains from starting new audio. */
+  const voiceCallActiveRef = useRef(true);
 
   function stopAiVoiceOutput() {
     cancelAllSpeech();
@@ -4101,6 +4108,8 @@ function VoiceInterviewSession({
   }
 
   function endVoiceCall() {
+    voiceCallActiveRef.current = false;
+    playInterviewHangUpSound();
     stopRecognitionRef.current?.();
     stopRecognitionRef.current = null;
     setListening(false);
@@ -4122,14 +4131,21 @@ function VoiceInterviewSession({
     texts: string[],
     opts?: { pauseBetweenMs?: number; leadInMs?: number }
   ) {
+    if (!voiceCallActiveRef.current) return;
     const parts = texts.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean);
     if (!parts.length) return;
+    if (!voiceCallActiveRef.current) return;
     const leadIn = opts?.leadInMs ?? 0;
     setAiSpeaking(true);
     if (leadIn > 0) {
       await new Promise<void>((r) => setTimeout(r, leadIn));
+      if (!voiceCallActiveRef.current) {
+        setAiSpeaking(false);
+        return;
+      }
     }
     try {
+      if (!voiceCallActiveRef.current) return;
       const pauseBetween = opts?.pauseBetweenMs ?? VOICE_GAP_MS;
       if (hasSupabase && supabase && user) {
         await speakSequentialHumanLike(supabase, parts, undefined, {
@@ -4180,6 +4196,7 @@ function VoiceInterviewSession({
       setTyping(true);
       const welcome = voiceInterviewerWelcomeCopy(profile);
       setMessages([{ id: id(), role: 'assistant', content: welcome }]);
+      playInterviewSessionStartSound();
       setVoiceStreamReply('');
       let speakStartedFromReady = false;
       let firstDelta = true;
@@ -4316,7 +4333,9 @@ function VoiceInterviewSession({
   }, [cvReady]);
 
   useEffect(() => {
+    voiceCallActiveRef.current = true;
     return () => {
+      voiceCallActiveRef.current = false;
       cancelAllSpeech();
       stopRecognitionRef.current?.();
       stopRecognitionRef.current = null;
@@ -4554,6 +4573,10 @@ function VoiceInterviewSession({
         setReflecting(false);
         await speakAsInterviewer(spoken, { pauseBetweenMs: VOICE_GAP_MS, leadInMs: 40 });
       }
+
+      if (response.finished) {
+        playInterviewSessionCompleteSound();
+      }
     } catch (e) {
       setReflecting(false);
       setVoiceStreamReply('');
@@ -4611,7 +4634,15 @@ function VoiceInterviewSession({
               ? 'Natural voice · quiet room & headphones recommended'
               : 'Sign in for neural speech · browser voice otherwise'
           }
-          onBack={() => setView('interview')}
+          onBack={() => {
+            voiceCallActiveRef.current = false;
+            cancelAllSpeech();
+            stopRecognitionRef.current?.();
+            stopRecognitionRef.current = null;
+            setListening(false);
+            setAiSpeaking(false);
+            setView('interview');
+          }}
         />
         <div className="interview-topbar-right">
           <span

@@ -1,6 +1,11 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders } from '../_shared/cors.ts';
+import {
+  lastAssistantQuestion,
+  NON_ANSWER_FEEDBACK,
+  shouldRedirectNonAnswer,
+} from '../_shared/interviewAnswerGate.ts';
 import { continueNextQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
@@ -54,7 +59,7 @@ async function scoreTurnAnswer(params: {
       {
         role: 'system',
         content:
-          'You score one mock interview turn. Respond ONLY JSON: {"score": integer from 1 to 10} based on clarity, relevance, and depth of the candidate answer.',
+          'You score one mock interview turn. Respond ONLY JSON: {"score": integer from 1 to 10} based on clarity, relevance, and depth of the candidate answer alone. If they did not answer the question (greeting, meta request, unrelated one-liner), score 1 or 2. Never infer substance from the interviewer text alone.',
       },
       {
         role: 'user',
@@ -119,7 +124,7 @@ Deno.serve(async (req) => {
     const profile = row.profile as Record<string, unknown>;
     const metricsSnapshot = readInterviewMetrics(profile);
     const messages: Msg[] = Array.isArray(row.messages) ? [...(row.messages as Msg[])] : [];
-    const turn = Number(row.turn_count) + 1;
+    const tentativeTurn = Number(row.turn_count) + 1;
 
     messages.push({ role: 'user', content: answer.trim() });
 
@@ -145,7 +150,7 @@ ${profileJson}
 
 Reply as instructed in the system message.`;
 
-    const isClosingOnly = turn >= MAX_TURNS;
+    const isClosingOnly = tentativeTurn >= MAX_TURNS;
 
     const streamMessages = isClosingOnly
       ? [
@@ -153,6 +158,7 @@ Reply as instructed in the system message.`;
             role: 'system' as const,
             content: `Mock interview for ${profession} — final candidate answer (question ${MAX_TURNS} of ${MAX_TURNS}). 
 You are the interviewer. Stream only your spoken closing: 2-4 sentences of feedback on their final answer. 
+Comment ONLY on what they actually said — no fake praise for content missing from their reply.
 No JSON, no bullet labels, no delimiter lines — plain speech only.`,
           },
           { role: 'user' as const, content: `Transcript:\n${transcript.slice(-9000)}\n\nGive closing feedback only.` },
@@ -170,11 +176,13 @@ Output ONLY the words you will speak aloud to the candidate, using this exact st
 3) On the following lines, write ONE concise follow-up interview question for ${profession}. It must fit the interview phase below and feel grounded in their CV/profile and transcript (and, in the medium phase, realistic tech or practice depth where appropriate).
 
 Rules:
+- Feedback MUST reflect ONLY what the candidate actually said in their latest reply. Do not praise experiences, tools, or stories they did not mention. The CV/profile context is for shaping your NEXT question, not for inventing what they said.
+- If their reply does not answer your question (e.g. greeting, asking to start, off-topic filler), say so briefly and professionally — do not give fake praise.
 - No JSON. No prefixes like "Feedback:" or "Question:".
 - The delimiter line must be exactly ${SPLIT} with no spaces before or after.
 - To end the interview after this turn with no follow-up question, output ${SPLIT} on its own line, then a second line with only NONE.
 
-${continueNextQuestionPolicyBlock(profession, turn)}`,
+${continueNextQuestionPolicyBlock(profession, tentativeTurn)}`,
           },
           { role: 'user' as const, content: userPrompt },
         ];
@@ -185,6 +193,46 @@ ${continueNextQuestionPolicyBlock(profession, turn)}`,
       async start(controller) {
         const send = (obj: unknown) => controller.enqueue(sseLine(obj));
         try {
+          const pendingQuestion = lastAssistantQuestion(messages);
+          if (!isClosingOnly && pendingQuestion) {
+            const redirect = await shouldRedirectNonAnswer({
+              profession,
+              question: pendingQuestion,
+              answer: answer.trim(),
+            });
+            if (redirect) {
+              const fb = NON_ANSWER_FEEDBACK;
+              const nq = pendingQuestion;
+              messages.push({ role: 'assistant', content: nq });
+              const { error: upEarly } = await supabase
+                .from('interview_sessions')
+                .update({
+                  messages,
+                  turn_count: row.turn_count,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', sessionId)
+                .eq('user_id', user.id);
+
+              if (upEarly) {
+                send({ t: 'error', message: upEarly.message });
+                controller.close();
+                return;
+              }
+
+              send({ t: 'ready', feedback: fb, nextQuestion: nq, finished: false });
+              send({
+                t: 'done',
+                feedback: fb,
+                nextQuestion: nq,
+                score: 1,
+                finished: false,
+              });
+              controller.close();
+              return;
+            }
+          }
+
           let full = '';
           for await (const chunk of chatCompletionTextStream(streamMessages, { temperature })) {
             full += chunk;
@@ -216,7 +264,7 @@ ${continueNextQuestionPolicyBlock(profession, turn)}`,
             .from('interview_sessions')
             .update({
               messages,
-              turn_count: turn,
+              turn_count: tentativeTurn,
               updated_at: new Date().toISOString(),
             })
             .eq('id', sessionId)

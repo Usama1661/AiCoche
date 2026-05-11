@@ -1,6 +1,11 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import {
+  lastAssistantQuestion,
+  NON_ANSWER_FEEDBACK,
+  shouldRedirectNonAnswer,
+} from '../_shared/interviewAnswerGate.ts';
 import { continueNextQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
@@ -48,7 +53,7 @@ Deno.serve(async (req) => {
     const profile = row.profile as Record<string, unknown>;
     const metricsSnapshot = readInterviewMetrics(profile);
     const messages: Msg[] = Array.isArray(row.messages) ? [...(row.messages as Msg[])] : [];
-    const turn = Number(row.turn_count) + 1;
+    const tentativeTurn = Number(row.turn_count) + 1;
 
     messages.push({ role: 'user', content: answer.trim() });
 
@@ -61,7 +66,7 @@ Deno.serve(async (req) => {
     let nextQuestion: string | null = null;
     let finished = false;
 
-    if (turn >= MAX_TURNS) {
+    if (tentativeTurn >= MAX_TURNS) {
       finished = true;
       nextQuestion = null;
       const transcriptEnd = messages
@@ -72,7 +77,7 @@ Deno.serve(async (req) => {
           {
             role: 'system',
             content:
-              `Mock interview for ${profession} — final candidate answer (question ${MAX_TURNS} of ${MAX_TURNS}). Respond ONLY JSON: {"feedback":"2-4 sentences closing feedback","score":number}`,
+              `Mock interview for ${profession} — final candidate answer (question ${MAX_TURNS} of ${MAX_TURNS}). Respond ONLY JSON: {"feedback":"2-4 sentences closing feedback","score":number}. Feedback must reflect only what the candidate actually said — no praise for missing content.`,
           },
           {
             role: 'user',
@@ -97,6 +102,40 @@ Deno.serve(async (req) => {
           `Thanks for completing all ${MAX_TURNS} practice answers. Summarize one strength you showed and one thing you would refine for a real interview.`;
       }
     } else {
+      const pendingQuestion = lastAssistantQuestion(messages);
+      if (pendingQuestion) {
+        const redirect = await shouldRedirectNonAnswer({
+          profession,
+          question: pendingQuestion,
+          answer: answer.trim(),
+        });
+        if (redirect) {
+          feedback = NON_ANSWER_FEEDBACK;
+          score = 1;
+          nextQuestion = pendingQuestion;
+          finished = false;
+          messages.push({ role: 'assistant', content: nextQuestion });
+          const { error: upRedirect } = await supabase
+            .from('interview_sessions')
+            .update({
+              messages,
+              turn_count: row.turn_count,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', sessionId)
+            .eq('user_id', user.id);
+
+          if (upRedirect) throw upRedirect;
+
+          return jsonResponse({
+            feedback,
+            score,
+            nextQuestion,
+            finished,
+          });
+        }
+      }
+
       const system = `You are a seasoned interviewer hiring for: ${profession}.
 
 The candidate just answered your previous question. Respond ONLY with valid JSON:
@@ -107,12 +146,16 @@ The candidate just answered your previous question. Respond ONLY with valid JSON
   "finished": boolean
 }
 
+Rules for feedback and scoring:
+- Base feedback ONLY on the candidate's latest message. Do not attribute skills, projects, or experiences they did not mention. Profile/CV is for shaping nextQuestion, not for inventing what they said.
+- If they did not answer the question (greeting, meta, off-topic), say so briefly and score 1-3.
+
 Rules for nextQuestion:
 - Must feel like a real hiring conversation for ${profession}: grounded in their CV/profile summary, transcript, and (when in the medium phase) current tools or newer practices where appropriate — not generic filler.
 - Build on the transcript: reference what they actually said; then probe appropriately for the phase below.
 - One concise question only. Use finished true with nextQuestion null only when ending early or when the interview has run its course.
 
-${continueNextQuestionPolicyBlock(profession, turn)}`;
+${continueNextQuestionPolicyBlock(profession, tentativeTurn)}`;
 
       const transcript = messages
         .map((m) => `${m.role === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`)
@@ -163,13 +206,13 @@ Give feedback, score, and next question.`;
             nextQuestion = null;
           }
         } catch {
-          finished = turn >= MAX_TURNS - 1;
+          finished = tentativeTurn >= MAX_TURNS - 1;
           nextQuestion = finished
             ? null
             : `Thinking about ${profession} roles specifically, what is one capability you are strengthening now, and how are you practicing it?`;
         }
       } else {
-        finished = turn >= MAX_TURNS - 1;
+        finished = tentativeTurn >= MAX_TURNS - 1;
         nextQuestion = finished
           ? null
           : `For ${profession}, describe a recent challenge where you had to trade off quality, scope, or time — what did you decide and why?`;
@@ -184,7 +227,7 @@ Give feedback, score, and next question.`;
       .from('interview_sessions')
       .update({
         messages,
-        turn_count: turn,
+        turn_count: tentativeTurn,
         updated_at: new Date().toISOString(),
       })
       .eq('id', sessionId)
