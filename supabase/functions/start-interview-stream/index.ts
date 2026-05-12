@@ -7,6 +7,7 @@ import {
   buildInterviewContextLines,
   experienceLabel,
   INTERVIEW_METRICS_KEY,
+  interviewCandidateFirstName,
   professionTitle,
   stripInternalInterviewFields,
 } from '../_shared/interviewProfile.ts';
@@ -54,6 +55,7 @@ Deno.serve(async (req) => {
     const profession = professionTitle(profile);
     const contextBlock = buildInterviewContextLines(profile, metrics ?? null);
     const expDesc = experienceLabel(profile.experience);
+    const candidateFirstName = interviewCandidateFirstName(profile, user);
 
     const voiceInterview = body.voiceInterview === true;
     const level = text(body.interviewLevel).toLowerCase() === 'advanced' ? 'advanced' : 'normal';
@@ -80,7 +82,11 @@ Session mode: ${modeHint}
 
 Stream ONLY the first interview question as plain text — one continuous question the interviewer would ask aloud.
 No JSON. No preamble like "Here is the question:" or labels. No quotation marks wrapping the whole question.
-
+${
+      candidateFirstName
+        ? `\nPersonalization: candidate first name is "${candidateFirstName}". If it fits naturally, use it at most once in this opening question; otherwise address them as "you".\n`
+        : ''
+    }
 ${firstQuestionPolicyBlock(profession, expDesc, promptStyle)}
 
 Candidate context (use this):

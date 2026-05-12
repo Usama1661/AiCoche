@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { createPortal } from 'react-dom';
 import { isAcceptableSkillLabel } from '@/lib/skillValidation';
 import { consumeContinueInterviewStream } from '@/lib/continueInterviewStream';
+import { stripFeedbackTrailingQuestionsForDelivery } from '@/lib/interviewFeedbackSanitize';
 import { consumeStartInterviewStream } from '@/lib/startInterviewStream';
 import {
   browserSupportsSpeechRecognition,
@@ -179,6 +180,8 @@ type ProjectCoachCompleteResponse = {
 type InterviewHistoryItem = {
   id: string;
   title: string;
+  /** Voice mock interviews are transcript-only here; typed sessions may continue in chat (Pro). */
+  sessionMode?: 'typed' | 'voice';
   status: 'active' | 'completed' | 'abandoned';
   score: number | null;
   turnCount: number;
@@ -501,6 +504,21 @@ const GENERIC_INTERVIEW_SESSION_TITLES = new Set(
   ['mock interview practice', 'interview practice', 'aicoche interview'].map((t) => t.toLowerCase()),
 );
 
+function inferInterviewSessionModeFromRecord(record: Record<string, unknown>, title: string): 'typed' | 'voice' {
+  const explicit =
+    text(record.sessionMode) ||
+    text(record.session_mode) ||
+    text((record.interview as Record<string, unknown> | undefined)?.sessionMode);
+  if (explicit === 'voice' || explicit === 'typed') return explicit;
+  if (/\bvoice mock interview\b/i.test(title)) return 'voice';
+  return 'typed';
+}
+
+/** Voice sessions cannot be continued as typed chat; rely on title for legacy rows. */
+function isVoiceInterviewSession(session: InterviewHistoryItem): boolean {
+  return session.sessionMode === 'voice' || /\bvoice mock interview\b/i.test(session.title);
+}
+
 function mergeInterviewHistoryDuplicates(a: InterviewHistoryItem, b: InterviewHistoryItem): InterviewHistoryItem {
   const rank = (s: InterviewHistoryItem) => {
     let r = 0;
@@ -542,9 +560,13 @@ function mergeInterviewHistoryDuplicates(a: InterviewHistoryItem, b: InterviewHi
         ? 'abandoned'
         : 'active';
 
+  const sessionMode: InterviewHistoryItem['sessionMode'] =
+    isVoiceInterviewSession(primary) || isVoiceInterviewSession(secondary) ? 'voice' : 'typed';
+
   return {
     ...primary,
     title,
+    sessionMode,
     messages,
     turnCount: Math.max(primary.turnCount, secondary.turnCount, mergedUserCount),
     score: primary.score ?? secondary.score,
@@ -592,9 +614,12 @@ function normalizeInterviewHistory(value: unknown): InterviewHistoryItem[] {
         : createdAt;
     const status: InterviewHistoryItem['status'] = record.status === 'completed' || record.status === 'abandoned' ? record.status : 'active';
     const messages = normalizeInterviewMessages(record.messages);
+    const title = text(record.title) || 'Mock interview practice';
+    const sessionMode = inferInterviewSessionModeFromRecord(record, title);
     return [{
       id: itemId || id(),
-      title: text(record.title) || 'Mock interview practice',
+      title,
+      sessionMode,
       status,
       score: normalizeInterviewScore(record.score),
       turnCount: typeof record.turnCount === 'number'
@@ -1996,7 +2021,7 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
       .invoke<ProjectCoachRecommendResponse>('project-coach', {
         body: {
           action: 'recommend',
-          profile: buildUserProfile(profileSnap),
+          profile: buildUserProfile(profileSnap, user),
           metrics: buildProjectMetricsSnapshot(metricsSnap),
         },
       })
@@ -2032,7 +2057,7 @@ function Home({ user, profile, setProfile, metrics, usage, setView, setUsage, se
             body: {
               action: 'recommend',
               forceNew: true,
-              profile: buildUserProfile(profileRef.current),
+              profile: buildUserProfile(profileRef.current, user),
               metrics: buildProjectMetricsSnapshot(metricsRef.current),
             },
           });
@@ -2997,7 +3022,13 @@ function InterviewTab({
               </div>
               <span className="row" style={{ gap: 8 }}>
                 {session.score != null ? <span className="chip success">Score {session.score}/10</span> : <span className="chip">No score yet</span>}
-                <span className="chip">{usage.plan === 'pro' ? 'View / continue' : 'View only'}</span>
+                <span className="chip">
+                  {isVoiceInterviewSession(session)
+                    ? 'View transcript'
+                    : usage.plan === 'pro'
+                      ? 'View / continue'
+                      : 'View only'}
+                </span>
               </span>
             </button>
           ))}
@@ -3277,7 +3308,7 @@ function Quiz({ user, profile, metrics, setMetrics, setView }: CommonProps) {
           skills: skillPool,
           count: 6,
           quizNumber: quizIndex + 1,
-          profile: buildUserProfile(profile),
+          profile: buildUserProfile(profile, user),
           metrics: buildProjectMetricsSnapshot(metrics),
         },
       })
@@ -3789,6 +3820,7 @@ function CvUpload({ metrics, setMetrics, setView, setError, setBusy, busy }: Com
 }
 
 function CvAnalysisScreen({
+  user,
   profile,
   setProfile,
   metrics,
@@ -3821,7 +3853,7 @@ function CvAnalysisScreen({
           body: {
             cvText: metrics.lastCvText,
             cvDocumentId: metrics.lastCvDocumentId,
-            userProfile: buildUserProfile(profile),
+            userProfile: buildUserProfile(profile, user),
           },
         });
         if (error) throw error;
@@ -3883,6 +3915,7 @@ function CvAnalysisScreen({
 }
 
 function InterviewSession({
+  user,
   profile,
   metrics,
   setMetrics,
@@ -3922,6 +3955,7 @@ function InterviewSession({
     const item: InterviewHistoryItem = {
       id: partial.id,
       title: partial.title ?? sessionTitle,
+      sessionMode: partial.sessionMode ?? 'typed',
       status: partial.status ?? 'active',
       score: partial.score ?? null,
       turnCount: partial.turnCount ?? partial.messages.filter((message) => message.role === 'user').length,
@@ -3958,7 +3992,7 @@ function InterviewSession({
                 supabaseUrl,
                 anonKey: supabaseAnonKey,
                 accessToken: token,
-                profile: buildUserProfile(profile),
+                profile: buildUserProfile(profile, user),
                 metrics: buildProjectMetricsSnapshot(metrics),
                 onDelta: (c) => {
                   if (firstDelta) {
@@ -3988,7 +4022,7 @@ function InterviewSession({
             } catch {
               setBootstrapStreamText('');
               const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
-                body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+                body: { profile: buildUserProfile(profile, user), metrics: buildProjectMetricsSnapshot(metrics) },
               });
               if (error) throw error;
               response = normalizeStartInterviewResponse(data, profile);
@@ -4000,7 +4034,7 @@ function InterviewSession({
             }
           } else {
             const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
-              body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+              body: { profile: buildUserProfile(profile, user), metrics: buildProjectMetricsSnapshot(metrics) },
             });
             if (error) throw error;
             response = normalizeStartInterviewResponse(data, profile);
@@ -4097,10 +4131,11 @@ function InterviewSession({
           profile.professionLabel || profile.professionalProfile.currentDesignation || ''
         );
       }
+      const fbClean = stripFeedbackTrailingQuestionsForDelivery(response.feedback, response.nextQuestion);
       setMetrics((m) => ({ ...m, lastInterviewScore: response.score }));
       const nextMessages: Message[] = [
         ...answeredMessages,
-        { id: id(), role: 'assistant', content: response.feedback, score: response.score },
+        { id: id(), role: 'assistant', content: fbClean, score: response.score },
         ...(response.nextQuestion ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }] : [{ id: id(), role: 'assistant' as const, content: closingLine }]),
       ];
       const status = response.finished ? 'completed' : 'active';
@@ -4120,7 +4155,7 @@ function InterviewSession({
           body: {
             sessionId,
             title: sessionTitle,
-            profile: buildUserProfile(profile),
+            profile: buildUserProfile(profile, user),
             messages: nextMessages.map((message) => ({ role: message.role, content: message.content, score: message.score })),
             status,
             score: response.score * 10,
@@ -4287,10 +4322,14 @@ function pickWelcomeToFirstQuestionBridge(): string {
 }
 
 /** Short spoken welcome before the first interview question (voice UX). */
-function voiceInterviewerWelcomeCopy(profile: ProfileState): string {
-  const raw = profile.professionalProfile.fullName?.trim() || '';
-  const first = raw ? raw.split(/\s+/)[0] : '';
-  const name = first ? first.charAt(0).toUpperCase() + first.slice(1).toLowerCase() : 'there';
+function voiceInterviewerWelcomeCopy(profile: ProfileState, user: User | null): string {
+  const raw =
+    profile.professionalProfile.fullName?.trim() ||
+    (user ? displayNameFor(user).trim() : '') ||
+    '';
+  const firstToken = raw.split(/\s+/).filter(Boolean)[0] ?? '';
+  const usable = firstToken && firstToken.toLowerCase() !== 'user' ? firstToken : '';
+  const name = usable ? usable.charAt(0).toUpperCase() + usable.slice(1).toLowerCase() : 'there';
   const role = (
     profile.professionLabel ||
     profile.professionalProfile.currentDesignation ||
@@ -4426,6 +4465,7 @@ function VoiceInterviewSession({
     const item: InterviewHistoryItem = {
       id: partial.id,
       title: partial.title ?? sessionTitle,
+      sessionMode: 'voice',
       status: partial.status ?? 'active',
       score: partial.score ?? null,
       turnCount: partial.turnCount ?? partial.messages.filter((message) => message.role === 'user').length,
@@ -4447,7 +4487,7 @@ function VoiceInterviewSession({
         return;
       }
       setTyping(true);
-      const welcome = voiceInterviewerWelcomeCopy(profile);
+      const welcome = voiceInterviewerWelcomeCopy(profile, user);
       setMessages([{ id: id(), role: 'assistant', content: welcome }]);
       playInterviewSessionStartSound();
       setVoiceStreamReply('');
@@ -4465,7 +4505,7 @@ function VoiceInterviewSession({
                 supabaseUrl,
                 anonKey: supabaseAnonKey,
                 accessToken: token,
-                profile: buildUserProfile(profile),
+                profile: buildUserProfile(profile, user),
                 metrics: buildProjectMetricsSnapshot(metrics),
                 voiceInterview: true,
                 interviewLevel: voiceInterviewLevel,
@@ -4512,7 +4552,7 @@ function VoiceInterviewSession({
             } catch {
               setVoiceStreamReply('');
               const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
-                body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+                body: { profile: buildUserProfile(profile, user), metrics: buildProjectMetricsSnapshot(metrics) },
               });
               if (error) throw error;
               response = normalizeStartInterviewResponse(data, profile);
@@ -4531,7 +4571,7 @@ function VoiceInterviewSession({
             }
           } else {
             const { data, error } = await supabase.functions.invoke<{ sessionId: string; question: string }>('start-interview', {
-              body: { profile: buildUserProfile(profile), metrics: buildProjectMetricsSnapshot(metrics) },
+              body: { profile: buildUserProfile(profile, user), metrics: buildProjectMetricsSnapshot(metrics) },
             });
             if (error) throw error;
             response = normalizeStartInterviewResponse(data, profile);
@@ -4699,7 +4739,14 @@ function VoiceInterviewSession({
                   const fb = full.slice(0, idx).trim();
                   if (fb.length > 12) {
                     voiceFeedbackTtsStartedRef.current = true;
-                    const copy = fb;
+                    const afterProv = full.slice(idx + MARK.length).trim();
+                    const head = afterProv.split(/\s+/)[0]?.toUpperCase() ?? '';
+                    const provNq =
+                      afterProv.length >= 24 &&
+                      head !== 'NONE' &&
+                      head !== 'END' &&
+                      head !== 'N/A';
+                    const copy = provNq ? stripFeedbackTrailingQuestionsForDelivery(fb, afterProv) : fb;
                     voiceTtsChainRef.current = voiceTtsChainRef.current
                       .catch(() => {})
                       .then(() =>
@@ -4747,10 +4794,12 @@ function VoiceInterviewSession({
         );
       }
 
+      const fbClean = stripFeedbackTrailingQuestionsForDelivery(response.feedback, response.nextQuestion);
+
       setMetrics((m) => ({ ...m, lastInterviewScore: response.score }));
       const nextMessages: Message[] = [
         ...answeredMessages,
-        { id: id(), role: 'assistant', content: response.feedback, score: response.score },
+        { id: id(), role: 'assistant', content: fbClean, score: response.score },
         ...(response.nextQuestion
           ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }]
           : [{ id: id(), role: 'assistant' as const, content: closingLine }]),
@@ -4772,7 +4821,7 @@ function VoiceInterviewSession({
           body: {
             sessionId,
             title: sessionTitle,
-            profile: buildUserProfile(profile),
+            profile: buildUserProfile(profile, user),
             messages: nextMessages.map((message) => ({ role: message.role, content: message.content, score: message.score })),
             status,
             score: response.score * 10,
@@ -4781,7 +4830,7 @@ function VoiceInterviewSession({
         });
       }
 
-      const spoken: string[] = [response.feedback];
+      const spoken: string[] = [fbClean];
       if (response.nextQuestion?.trim()) {
         spoken.push(pickVoiceFeedbackToQuestionBridge(), response.nextQuestion.trim());
       } else {
@@ -5050,7 +5099,18 @@ function VoiceInterviewSession({
   );
 }
 
-function InterviewHistorySession({ profile, metrics, setMetrics, usage, interviewSessions, setInterviewSessions, selectedInterviewSessionId, setView, setError }: CommonProps) {
+function InterviewHistorySession({
+  user,
+  profile,
+  metrics,
+  setMetrics,
+  usage,
+  interviewSessions,
+  setInterviewSessions,
+  selectedInterviewSessionId,
+  setView,
+  setError,
+}: CommonProps) {
   const selected = interviewSessions.find((session) => session.id === selectedInterviewSessionId) ?? null;
   const [messages, setMessages] = useState<Message[]>(selected?.messages ?? []);
   const [input, setInput] = useState('');
@@ -5075,6 +5135,8 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
     );
   }
   const session = selected;
+  const voiceTranscriptOnly = isVoiceInterviewSession(session);
+  const allowTypedContinue = canContinue && !voiceTranscriptOnly;
 
   function saveHistory(nextMessages: Message[], response?: { score: number; finished: boolean }) {
     const nextSession: InterviewHistoryItem = {
@@ -5090,7 +5152,7 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
 
   async function send() {
     const answer = input.trim();
-    if (!answer || typing || !canContinue) return;
+    if (!answer || typing || !allowTypedContinue) return;
     const userMessage: Message = { id: id(), role: 'user', content: answer };
     const answeredMessages = [...messages, userMessage];
     const userAnswerCount = answeredMessages.filter((message) => message.role === 'user').length;
@@ -5113,10 +5175,12 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
         );
       }
 
+      const fbClean = stripFeedbackTrailingQuestionsForDelivery(response.feedback, response.nextQuestion);
+
       setMetrics((current) => ({ ...current, lastInterviewScore: response.score }));
       const nextMessages: Message[] = [
         ...answeredMessages,
-        { id: id(), role: 'assistant', content: response.feedback, score: response.score },
+        { id: id(), role: 'assistant', content: fbClean, score: response.score },
         ...(response.nextQuestion
           ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }]
           : [{ id: id(), role: 'assistant' as const, content: 'That completes this mock interview. Great work!' }]),
@@ -5129,7 +5193,7 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
           body: {
             sessionId: session.id,
             title: session.title,
-            profile: buildUserProfile(profile),
+            profile: buildUserProfile(profile, user),
             messages: nextMessages.map((message) => ({ role: message.role, content: message.content, score: message.score })),
             status: response.finished ? 'completed' : 'active',
             score: response.score * 10,
@@ -5148,7 +5212,13 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
     <section className="screen interview-screen">
       <div className="interview-topbar">
         <Header title="Past interview" onBack={() => setView('interview')} />
-        <span className="mini-pill">{canContinue ? 'Pro: continue enabled' : 'Free: view only'}</span>
+        <span className="mini-pill">
+          {voiceTranscriptOnly
+            ? 'Voice: transcript only'
+            : canContinue
+              ? 'Pro: continue enabled'
+              : 'Free: view only'}
+        </span>
       </div>
 
       <div className="interview-chat-card">
@@ -5184,7 +5254,7 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
           <div ref={messagesEndRef} />
         </div>
 
-        {canContinue ? (
+        {allowTypedContinue ? (
           <div className="chat-composer">
             <textarea
               className="input chat-textarea"
@@ -5201,6 +5271,13 @@ function InterviewHistorySession({ profile, metrics, setMetrics, usage, intervie
             />
             <Button onClick={send} disabled={!input.trim() || typing}>Send</Button>
             <button className="button ghost chat-end-button" onClick={() => setView('interview')}>Back</button>
+          </div>
+        ) : voiceTranscriptOnly ? (
+          <div className="chat-readonly-footer">
+            <p className="body muted">
+              Voice mock interviews are saved as transcripts only. Chat continue is not available here. Start a new voice session from Interviews to practice again with the microphone.
+            </p>
+            <button className="button ghost" onClick={() => setView('interview')}>Back to sessions</button>
           </div>
         ) : (
           <div className="chat-readonly-footer">
@@ -5578,8 +5655,12 @@ function normalizeContinueInterviewResponse(value: unknown, userAnswerCount: num
   };
 }
 
-function buildUserProfile(profile: ProfileState) {
+function buildUserProfile(profile: ProfileState, user?: User | null) {
   const professional = profile.professionalProfile;
+  const accountLabelRaw = user ? displayNameFor(user) : '';
+  const accountOk =
+    accountLabelRaw.trim() && accountLabelRaw.trim().toLowerCase() !== 'user' ? accountLabelRaw.trim() : '';
+  const resolvedFullName = text(professional.fullName) || accountOk;
   return {
     professionKey: profile.professionKey,
     professionLabel: profile.professionLabel,
@@ -5589,8 +5670,9 @@ function buildUserProfile(profile: ProfileState) {
     skills: compactSkills(profile.skills).slice(0, 18),
     tools: compactSkills(profile.tools).slice(0, 12),
     projects: compactList(profile.projects).slice(0, 8),
+    ...(accountOk ? { displayName: accountOk } : {}),
     professionalProfile: {
-      fullName: professional.fullName,
+      fullName: resolvedFullName || professional.fullName,
       headline: professional.headline,
       bio: professional.bio.slice(0, 700),
       currentCompany: professional.currentCompany,

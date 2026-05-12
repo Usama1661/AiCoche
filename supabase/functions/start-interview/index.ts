@@ -6,6 +6,7 @@ import {
   buildInterviewContextLines,
   experienceLabel,
   INTERVIEW_METRICS_KEY,
+  interviewCandidateFirstName,
   professionTitle,
   stripInternalInterviewFields,
 } from '../_shared/interviewProfile.ts';
@@ -36,6 +37,7 @@ Deno.serve(async (req) => {
     const profession = professionTitle(profile);
     const contextBlock = buildInterviewContextLines(profile, metrics ?? null);
     const expDesc = experienceLabel(profile.experience);
+    const candidateFirstName = interviewCandidateFirstName(profile, user);
 
     const system = `You are an expert hiring manager running a realistic mock interview for this ONE candidate.
 
@@ -43,7 +45,11 @@ Target role / field: ${profession}
 
 Your task: produce ONLY valid JSON:
 {"question":"..."}
-
+${
+      candidateFirstName
+        ? `\nPersonalization: candidate first name is "${candidateFirstName}". If it fits naturally, use it at most once in this opening question; otherwise address them as "you".\n`
+        : ''
+    }
 ${firstQuestionPolicyBlock(profession, expDesc, 'typed')}
 
 Candidate context (use this):

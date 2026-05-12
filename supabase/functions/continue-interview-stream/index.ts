@@ -9,12 +9,15 @@ import {
 import { continueNextQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
+  interviewCandidateFirstName,
   interviewPromptStyle,
+  interviewShouldAddressByNameThisTurn,
   professionTitle,
   readInterviewMetrics,
   stripInternalInterviewFields,
 } from '../_shared/interviewProfile.ts';
 import { chatCompletionJson, chatCompletionTextStream } from '../_shared/openai.ts';
+import { stripFeedbackTrailingQuestionsForDelivery } from '../_shared/interviewFeedbackSanitize.ts';
 import { isResponse, requireAuth } from '../_shared/supabase.ts';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
@@ -60,7 +63,7 @@ async function scoreTurnAnswer(params: {
       {
         role: 'system',
         content:
-          'You score one mock interview turn. Respond ONLY JSON: {"score": integer from 1 to 10} based on clarity, relevance, and depth of the candidate answer alone. If they did not answer the question (greeting, meta request, unrelated one-liner), score 1 or 2. Never infer substance from the interviewer text alone.',
+          'You score one mock interview turn. Respond ONLY JSON: {"score": integer from 1 to 10} based on clarity, relevance, and depth of the candidate answer alone. If they only sent a greeting or unrelated filler with no clear intent, score 1-2. If they honestly said they do not know or have no answer (including messy speech-to-text), score 4-7 for clear transparency — not as a failed attempt to bluff. If they said they have not worked on it yet, it is in progress, or they will explain later (experience gap / deferral), score 4-7 when that intent is clear. If they commented on interview flow (e.g. two questions at once, confusion about which to answer), score 6-9 for a clear, reasonable process comment — not as dodging the topic. If they asked for easier, shorter, or simpler questions; said questions were too hard or difficult; or asked for slower pace, repeat, or clarification (including messy speech-to-text), score 6-9 based on how clear and reasonable the request was — not as a failed technical answer. If they attempted a substantive answer (even with transcription errors), score on substance. Never infer substance from the interviewer text alone.',
       },
       {
         role: 'user',
@@ -132,6 +135,9 @@ Deno.serve(async (req) => {
 
     const profession = professionTitle(profile);
     const candidateSummary = buildInterviewContextLines(profile, metricsSnapshot ?? null);
+    const candidateFirstName = interviewCandidateFirstName(profile, user);
+    const useNameThisTurn =
+      tentativeTurn < MAX_TURNS && interviewShouldAddressByNameThisTurn(String(row.id), tentativeTurn);
 
     const transcript = messages
       .map((m) => `${m.role === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`)
@@ -154,6 +160,15 @@ Reply as instructed in the system message.`;
 
     const isClosingOnly = tentativeTurn >= MAX_TURNS;
 
+    const nameDirectives =
+      candidateFirstName.length > 0
+        ? `Personalization — candidate first name: "${candidateFirstName}". ${
+            useNameThisTurn
+              ? 'This turn you MAY use their first name at most once if it sounds natural (often at the very start of the spoken block after the delimiter when introducing the next question). Never use the name more than once in the entire reply. Do not add honorifics.'
+              : 'This turn do not address them by name; use neutral "you" only.'
+          }`
+        : '';
+
     const streamMessages = isClosingOnly
       ? [
           {
@@ -161,7 +176,11 @@ Reply as instructed in the system message.`;
             content: `Mock interview for ${profession} — final candidate answer (question ${MAX_TURNS} of ${MAX_TURNS}). 
 You are the interviewer. Stream only your spoken closing: 2-4 sentences of feedback on their final answer. 
 Comment ONLY on what they actually said — no fake praise for content missing from their reply.
-No JSON, no bullet labels, no delimiter lines — plain speech only.`,
+No JSON, no bullet labels, no delimiter lines — plain speech only.${
+              candidateFirstName
+                ? ` Candidate first name: "${candidateFirstName}". Prefer opening this closing with their first name once (warm, professional), at most one use in the whole closing; if it would sound odd, use neutral "you" instead.`
+                : ''
+            }`,
           },
           { role: 'user' as const, content: `Transcript:\n${transcript.slice(-9000)}\n\nGive closing feedback only.` },
         ]
@@ -172,14 +191,21 @@ No JSON, no bullet labels, no delimiter lines — plain speech only.`,
 
 The candidate just answered your previous question.
 
-Output ONLY the words you will speak aloud to the candidate, using this exact structure:
+${nameDirectives ? `${nameDirectives}\n\n` : ''}Output ONLY the words you will speak aloud to the candidate, using this exact structure:
 1) Write 2-4 sentences of constructive feedback (clarity, relevance, depth).
 2) On its own line, output exactly this delimiter (nothing else on that line): ${SPLIT}
 3) On the following lines, write ONE concise follow-up interview question for ${profession}. It must fit the interview phase below and feel grounded in their CV/profile and transcript (and, in the medium phase, realistic tech or practice depth where appropriate).
 
 Rules:
+- CRITICAL — one question this turn: Text BEFORE the delimiter is feedback only. Use complete statements there — NO question marks in the feedback section and NO direct asks (no "could you share…?", "what is your…?", "can you tell me…?" before the delimiter). The ONLY interview question you ask aloud this turn is the block AFTER the delimiter. If you want a nudge, phrase it as a statement (e.g. "A concrete example from your work would make this stronger.").
 - Feedback MUST reflect ONLY what the candidate actually said in their latest reply. Do not praise experiences, tools, or stories they did not mention. The CV/profile context is for shaping your NEXT question, not for inventing what they said.
-- If their reply does not answer your question (e.g. greeting, asking to start, off-topic filler), say so briefly and professionally — do not give fake praise.
+- If their reply does not answer your question (e.g. bare greeting, off-topic filler), say so briefly and professionally — do not give fake praise.
+- If they say they do not know or have no answer — including broken grammar or missing words from speech-to-text — respond supportively: normalize that honesty is fine in a real interview, optionally one short definitional hint if helpful, then after the delimiter ask ONE easier or related question in plain language. Do not use the harsh "you did not answer" tone.
+- If they say they have not worked on this yet, it is not done, or they will explain later (including phrases like "don't have work on this feature"), treat it as substantive context: acknowledge briefly, then after the delimiter ask ONE question that either narrows the scope or probes adjacent experience — same tone as a human interviewer, not a rejection.
+- If they ask for easier, shorter, or simpler questions; say yours are too hard; or want slower pace, repetition, or clarification — including broken grammar or missing words from speech-to-text — acknowledge politely and comply: after the delimiter, ask ONE short, more basic question in plain language (still relevant to ${profession}). Do not refuse or shame them for asking.
+- If their latest reply raises interview mechanics (e.g. overlapping or stacked questions, confusion about which prompt to answer), acknowledge in statements only before the delimiter; after the delimiter, ask exactly ONE clear question — do not introduce a second new topic in the same turn.
+- When inferring meaning from messy transcription, prefer the most charitable reasonable interpretation.
+- CV / profile consistency (like a prepared interviewer): if their latest reply says they have not done or not worked on something that clearly appears in the candidate summary or profile JSON (same project, tool, stack, or responsibility), your feedback may calmly note that their resume or profile lists it in statement form; put any clarifying ask ONLY after the delimiter. Only cite facts that are explicit in the provided summary or JSON — never invent. If nothing clearly matches, pivot without implying a contradiction.
 - No JSON. No prefixes like "Feedback:" or "Question:".
 - The delimiter line must be exactly ${SPLIT} with no spaces before or after.
 - To end the interview after this turn with no follow-up question, output ${SPLIT} on its own line, then a second line with only NONE.
@@ -248,14 +274,15 @@ ${continueNextQuestionPolicyBlock(profession, tentativeTurn, promptStyle)}`,
           }
 
           const { feedback, nextQuestion } = parseStreamedReply(full, isClosingOnly);
-          const fb = feedback.trim();
+          const nqRaw = isClosingOnly ? null : nextQuestion?.trim() ? nextQuestion.trim() : null;
+          const fb = stripFeedbackTrailingQuestionsForDelivery(feedback.trim(), nqRaw);
           if (!fb) {
             send({ t: 'error', message: 'Could not parse interviewer feedback' });
             controller.close();
             return;
           }
 
-          const nq = isClosingOnly ? null : nextQuestion?.trim() ? nextQuestion.trim() : null;
+          const nq = nqRaw;
           const finished = isClosingOnly || !nq;
 
           if (!finished && nq) {

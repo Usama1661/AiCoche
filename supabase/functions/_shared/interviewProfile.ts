@@ -109,3 +109,53 @@ export function readInterviewMetrics(profile: Record<string, unknown>): Record<s
   const raw = profile[INTERVIEW_METRICS_KEY];
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : undefined;
 }
+
+/** First token of a display/full string for interview address; empty if unusable. */
+function firstNameFromDisplayString(raw: string): string {
+  const compact = raw.replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  const token = compact.split(' ').filter(Boolean)[0] ?? '';
+  if (token.length < 2 || token.length > 48) return '';
+  if (token.toLowerCase() === 'user') return '';
+  return token;
+}
+
+type AuthNameHint = { user_metadata?: Record<string, unknown> } | null | undefined;
+
+/** First name for prompts/TTS; profile first, then auth display metadata when profile name is missing. */
+export function interviewCandidateFirstName(
+  profile: Record<string, unknown>,
+  authUser?: AuthNameHint,
+): string {
+  const prof = (profile.professionalProfile as Record<string, unknown> | undefined) ?? {};
+  const fromProfile =
+    firstNameFromDisplayString(text(prof.fullName)) ||
+    firstNameFromDisplayString(text(profile.fullName)) ||
+    firstNameFromDisplayString(text(profile.displayName)) ||
+    firstNameFromDisplayString(text(profile.accountDisplayName)) ||
+    firstNameFromDisplayString(text(prof.displayName));
+  if (fromProfile) return fromProfile;
+
+  const meta = authUser?.user_metadata;
+  if (meta && typeof meta === 'object') {
+    const fromAuth =
+      firstNameFromDisplayString(text(meta.display_name)) ||
+      firstNameFromDisplayString(text(meta.full_name)) ||
+      firstNameFromDisplayString(text(meta.name));
+    if (fromAuth) return fromAuth;
+  }
+  return '';
+}
+
+/**
+ * Whether this follow-up turn should invite using the candidate's name (~half of eligible turns, stable per session).
+ * Skips the first candidate answer turn so the opener stays neutral.
+ */
+export function interviewShouldAddressByNameThisTurn(sessionId: string, tentativeTurn: number): boolean {
+  if (tentativeTurn < 2) return false;
+  let h = 0;
+  for (let i = 0; i < sessionId.length; i++) {
+    h = Math.imul(31, h) + sessionId.charCodeAt(i);
+  }
+  return (Math.abs(h) + tentativeTurn * 17) % 2 === 0;
+}
