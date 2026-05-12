@@ -48,6 +48,10 @@ type WebSpeechRecognitionErrorEvent = {
 let neuralAudio: HTMLAudioElement | null = null;
 let neuralObjectUrl: string | null = null;
 
+/** Tiny silent WAV — used only to satisfy mobile autoplay / “user gesture” policies for `<audio>`. */
+const SILENT_WAV_DATA_URL =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
+
 /** Neuron / browser speech “generation” — bump to invalidate in-flight playback (interrupt). */
 let speakGen = 0;
 
@@ -136,6 +140,31 @@ export function cancelAllSpeech(): void {
 }
 
 /**
+ * Mobile browsers (especially iOS Safari) block `HTMLAudioElement.play()` and may leave
+ * `speechSynthesis` paused until media is touched from a real tap. Voice interviews start
+ * TTS only after async network work, which breaks the gesture chain — call this **synchronously**
+ * from the same click that opens the voice interview, before `setState` / `await`.
+ */
+export function primeVoiceInterviewPlaybackFromUserGesture(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const a = new Audio(SILENT_WAV_DATA_URL);
+    a.volume = 0.0001;
+    a.setAttribute('playsinline', 'true');
+    a.setAttribute('webkit-playsinline', 'true');
+    void a.play().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.speechSynthesis.resume();
+    window.speechSynthesis.getVoices();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
  * Fetch one neural TTS clip for the given voice and play it (voice picker demo).
  * Stops any in-flight neural/browser speech first.
  */
@@ -175,6 +204,8 @@ function playMp3Base64(b64: string): Promise<void> {
     const url = URL.createObjectURL(blob);
     neuralObjectUrl = url;
     const audio = new Audio();
+    audio.setAttribute('playsinline', 'true');
+    audio.setAttribute('webkit-playsinline', 'true');
     neuralAudio = audio;
     audio.src = url;
 

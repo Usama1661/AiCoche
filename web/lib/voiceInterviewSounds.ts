@@ -20,6 +20,14 @@ function getCtx(): AudioContext | null {
   }
 }
 
+/**
+ * iOS Safari only unlocks Web Audio after `AudioContext.resume()` runs in direct response to a tap.
+ * Call synchronously from the same click/touch that navigates into the voice interview (before any `await`).
+ */
+export function primeInterviewSoundContextFromUserGesture(): void {
+  getCtx();
+}
+
 function beep(
   ctx: AudioContext,
   freq: number,

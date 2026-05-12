@@ -11,6 +11,7 @@ import {
   browserSupportsSpeechRecognition,
   cancelAllSpeech,
   previewInterviewTtsVoice,
+  primeVoiceInterviewPlaybackFromUserGesture,
   speakSequential,
   speakSequentialHumanLike,
   startSpeechRecognition,
@@ -19,6 +20,7 @@ import {
   playInterviewHangUpSound,
   playInterviewSessionCompleteSound,
   playInterviewSessionStartSound,
+  primeInterviewSoundContextFromUserGesture,
 } from '@/lib/voiceInterviewSounds';
 import {
   ASSISTANT_TTS_VOICE_OPTIONS,
@@ -2895,6 +2897,9 @@ function InterviewTab({
       openUpgradeModal?.('interview');
       return;
     }
+    // Mobile Safari blocks TTS / neural `<audio>` unless playback was unlocked in this tap (before async work).
+    primeVoiceInterviewPlaybackFromUserGesture();
+    primeInterviewSoundContextFromUserGesture();
     setView('voice-interview');
   }
 
@@ -3661,6 +3666,8 @@ function AssistantVoicePickerBody({
     }
     setPreviewVoiceId(voiceId);
     try {
+      primeVoiceInterviewPlaybackFromUserGesture();
+      primeInterviewSoundContextFromUserGesture();
       await previewInterviewTtsVoice(supabase, voiceId);
     } catch (e) {
       window.alert(e instanceof Error ? e.message : 'Could not play this sample.');
