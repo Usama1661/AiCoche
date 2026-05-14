@@ -4086,13 +4086,20 @@ function InterviewSession({
     const userMessage: Message = { id: id(), role: 'user', content: answer };
     const answeredMessages = [...messages, userMessage];
     const userAnswerCount = answeredMessages.filter((message) => message.role === 'user').length;
-    const closingLine = 'That completes this mock interview. Great work!';
+    const closingLine = interviewClosingLine(profile, user);
     setInput('');
     setMessages(answeredMessages);
     setTyping(true);
     setTurnStreamText('');
     try {
-      let response: { feedback: string; score: number; nextQuestion: string | null; finished: boolean };
+      let response: {
+        feedback: string;
+        score: number;
+        nextQuestion: string | null;
+        finished: boolean;
+        summaryMarkdown?: string | null;
+        overallScore10?: number | null;
+      };
       if (hasSupabase && supabase && sessionId) {
         const { data: auth } = await supabase.auth.getSession();
         const token = auth.session?.access_token;
@@ -4139,11 +4146,20 @@ function InterviewSession({
         );
       }
       const fbClean = stripFeedbackTrailingQuestionsForDelivery(response.feedback, response.nextQuestion);
-      setMetrics((m) => ({ ...m, lastInterviewScore: response.score }));
+      const scoreForMetrics = response.overallScore10 ?? response.score;
+      setMetrics((m) => ({ ...m, lastInterviewScore: scoreForMetrics }));
+      const tail: Message[] = [];
+      if (response.nextQuestion?.trim()) {
+        tail.push({ id: id(), role: 'assistant', content: response.nextQuestion.trim() });
+      } else if (response.finished && response.summaryMarkdown?.trim()) {
+        tail.push({ id: id(), role: 'assistant', content: response.summaryMarkdown.trim() });
+      } else if (response.finished) {
+        tail.push({ id: id(), role: 'assistant', content: closingLine });
+      }
       const nextMessages: Message[] = [
         ...answeredMessages,
         { id: id(), role: 'assistant', content: fbClean, score: response.score },
-        ...(response.nextQuestion ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }] : [{ id: id(), role: 'assistant' as const, content: closingLine }]),
+        ...tail,
       ];
       const status = response.finished ? 'completed' : 'active';
       if (response.finished) setSessionEnded(true);
@@ -4154,7 +4170,7 @@ function InterviewSession({
         title: sessionTitle,
         messages: nextMessages,
         status,
-        score: response.score,
+        score: scoreForMetrics,
         turnCount: answeredMessages.filter((message) => message.role === 'user').length,
       });
       if (hasSupabase && supabase && sessionId) {
@@ -4165,8 +4181,12 @@ function InterviewSession({
             profile: buildUserProfile(profile, user),
             messages: nextMessages.map((message) => ({ role: message.role, content: message.content, score: message.score })),
             status,
-            score: response.score * 10,
-            feedback: { latestScore: response.score },
+            score: Math.min(100, Math.max(0, Math.round(scoreForMetrics * 10))),
+            feedback: {
+              latestScore: response.score,
+              overallScore10: response.overallScore10 ?? null,
+              summaryPreview: response.summaryMarkdown?.slice(0, 400) ?? null,
+            },
           },
         });
       }
@@ -4223,7 +4243,7 @@ function InterviewSession({
             <h2 className="subtitle">{profile.professionLabel || 'Career'} practice session</h2>
           </div>
           <span className={`chat-status ${typing || interviewLiveBody ? 'active' : ''}`}>
-            {interviewLiveBody ? 'Streaming…' : typing ? 'Typing...' : 'Live'}
+            {interviewLiveBody ? 'Streaming…' : typing ? 'Analyzing your answer…' : 'Live'}
           </span>
         </div>
 
@@ -4655,7 +4675,7 @@ function VoiceInterviewSession({
         : voiceStreamLive
           ? 'Live reply…'
         : typing || voiceReplyBusy
-          ? 'Thinking…'
+          ? 'Analyzing your answer…'
           : listening
             ? 'Listening…'
             : 'Your turn — tap to speak below';
@@ -4677,16 +4697,33 @@ function VoiceInterviewSession({
     setVoiceStreamReply('');
     let usedStreamSuccess = false;
 
-    const closingLine = 'That completes this mock interview. Great work!';
-    const queueVoiceReplyTtsFromReady = (p: { feedback: string; nextQuestion: string | null }) => {
+    const closingLine = interviewClosingLine(profile, user);
+    const queueVoiceReplyTtsFromReady = (p: {
+      feedback: string;
+      nextQuestion: string | null;
+      finished?: boolean;
+      summaryMarkdown?: string | null;
+    }) => {
       voiceSpeakReadyTtsRef.current = true;
       const nq = p.nextQuestion?.trim() || null;
+      const sum = p.summaryMarkdown?.trim() || null;
       if (voiceFeedbackTtsStartedRef.current) {
         if (nq) {
           voiceTtsChainRef.current = voiceTtsChainRef.current
             .catch(() => {})
             .then(() =>
               speakAsInterviewer([pickVoiceFeedbackToQuestionBridge(), nq], {
+                pauseBetweenMs: VOICE_GAP_MS,
+                leadInMs: 18,
+              })
+            );
+        } else if (sum) {
+          const spokenSummary =
+            sum.length > 900 ? `${sum.slice(0, 900).trim()}… I’ve left the full summary in your transcript.` : sum;
+          voiceTtsChainRef.current = voiceTtsChainRef.current
+            .catch(() => {})
+            .then(() =>
+              speakAsInterviewer([pickVoiceFeedbackToClosingBridge(), spokenSummary], {
                 pauseBetweenMs: VOICE_GAP_MS,
                 leadInMs: 18,
               })
@@ -4704,7 +4741,9 @@ function VoiceInterviewSession({
       } else {
         const spoken = nq
           ? [p.feedback, pickVoiceFeedbackToQuestionBridge(), nq]
-          : [p.feedback, pickVoiceFeedbackToClosingBridge(), closingLine];
+          : sum
+            ? [p.feedback, pickVoiceFeedbackToClosingBridge(), sum.length > 900 ? `${sum.slice(0, 900).trim()}…` : sum]
+            : [p.feedback, pickVoiceFeedbackToClosingBridge(), closingLine];
         voiceTtsChainRef.current = voiceTtsChainRef.current
           .catch(() => {})
           .then(() =>
@@ -4717,7 +4756,14 @@ function VoiceInterviewSession({
     };
 
     try {
-      let response: { feedback: string; score: number; nextQuestion: string | null; finished: boolean };
+      let response: {
+        feedback: string;
+        score: number;
+        nextQuestion: string | null;
+        finished: boolean;
+        summaryMarkdown?: string | null;
+        overallScore10?: number | null;
+      };
 
       if (hasSupabase && supabase && sessionId) {
         const { data: auth } = await supabase.auth.getSession();
@@ -4773,6 +4819,8 @@ function VoiceInterviewSession({
               score: streamResult.score,
               nextQuestion: streamResult.nextQuestion,
               finished: streamResult.finished,
+              summaryMarkdown: streamResult.summaryMarkdown ?? null,
+              overallScore10: streamResult.overallScore10 ?? null,
             };
           } catch {
             voiceFeedbackTtsStartedRef.current = false;
@@ -4803,13 +4851,20 @@ function VoiceInterviewSession({
 
       const fbClean = stripFeedbackTrailingQuestionsForDelivery(response.feedback, response.nextQuestion);
 
-      setMetrics((m) => ({ ...m, lastInterviewScore: response.score }));
+      const scoreForMetrics = response.overallScore10 ?? response.score;
+      setMetrics((m) => ({ ...m, lastInterviewScore: scoreForMetrics }));
+      const tail: Message[] = [];
+      if (response.nextQuestion?.trim()) {
+        tail.push({ id: id(), role: 'assistant', content: response.nextQuestion.trim() });
+      } else if (response.finished && response.summaryMarkdown?.trim()) {
+        tail.push({ id: id(), role: 'assistant', content: response.summaryMarkdown.trim() });
+      } else if (response.finished) {
+        tail.push({ id: id(), role: 'assistant', content: closingLine });
+      }
       const nextMessages: Message[] = [
         ...answeredMessages,
         { id: id(), role: 'assistant', content: fbClean, score: response.score },
-        ...(response.nextQuestion
-          ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }]
-          : [{ id: id(), role: 'assistant' as const, content: closingLine }]),
+        ...tail,
       ];
       const status = response.finished ? 'completed' : 'active';
       if (response.finished) setSessionEnded(true);
@@ -4819,7 +4874,7 @@ function VoiceInterviewSession({
         title: sessionTitle,
         messages: nextMessages,
         status,
-        score: response.score,
+        score: scoreForMetrics,
         turnCount: answeredMessages.filter((message) => message.role === 'user').length,
       });
       setTyping(false);
@@ -4831,15 +4886,26 @@ function VoiceInterviewSession({
             profile: buildUserProfile(profile, user),
             messages: nextMessages.map((message) => ({ role: message.role, content: message.content, score: message.score })),
             status,
-            score: response.score * 10,
-            feedback: { latestScore: response.score },
+            score: Math.min(100, Math.max(0, Math.round(scoreForMetrics * 10))),
+            feedback: {
+              latestScore: response.score,
+              overallScore10: response.overallScore10 ?? null,
+              summaryPreview: response.summaryMarkdown?.slice(0, 400) ?? null,
+            },
           },
         });
       }
 
+      const summarySpeak =
+        response.summaryMarkdown?.trim().length && response.summaryMarkdown.trim().length > 900
+          ? `${response.summaryMarkdown.trim().slice(0, 900)}…`
+          : response.summaryMarkdown?.trim() || '';
+
       const spoken: string[] = [fbClean];
       if (response.nextQuestion?.trim()) {
         spoken.push(pickVoiceFeedbackToQuestionBridge(), response.nextQuestion.trim());
+      } else if (summarySpeak) {
+        spoken.push(pickVoiceFeedbackToClosingBridge(), summarySpeak);
       } else {
         spoken.push(pickVoiceFeedbackToClosingBridge(), closingLine);
       }
@@ -4852,6 +4918,15 @@ function VoiceInterviewSession({
                 .catch(() => {})
                 .then(() =>
                   speakAsInterviewer([pickVoiceFeedbackToQuestionBridge(), response.nextQuestion!.trim()], {
+                    pauseBetweenMs: VOICE_GAP_MS,
+                    leadInMs: 22,
+                  })
+                );
+            } else if (summarySpeak) {
+              voiceTtsChainRef.current = voiceTtsChainRef.current
+                .catch(() => {})
+                .then(() =>
+                  speakAsInterviewer([pickVoiceFeedbackToClosingBridge(), summarySpeak], {
                     pauseBetweenMs: VOICE_GAP_MS,
                     leadInMs: 22,
                   })
@@ -4919,7 +4994,13 @@ function VoiceInterviewSession({
         transcriptRef.current = text;
         setLiveTranscript(text);
       },
-      onError: (msg) => setError(`Microphone / speech: ${msg}`),
+      onError: (msg) => {
+        const detail =
+          msg === 'not-allowed'
+            ? 'Microphone blocked (not-allowed). Allow this site in the browser address bar (lock or tune icon → Site settings → Microphone → Allow). On Windows: Settings → Privacy & security → Microphone → let your browser access the mic. Voice needs HTTPS or localhost.'
+            : `Microphone / speech: ${msg}`;
+        setError(detail);
+      },
       onEnd: () => setListening(false),
     });
     setListening(true);
@@ -5163,11 +5244,19 @@ function InterviewHistorySession({
     const userMessage: Message = { id: id(), role: 'user', content: answer };
     const answeredMessages = [...messages, userMessage];
     const userAnswerCount = answeredMessages.filter((message) => message.role === 'user').length;
+    const closingLine = interviewClosingLine(profile, user);
     setInput('');
     setMessages(answeredMessages);
     setTyping(true);
     try {
-      let response: { feedback: string; score: number; nextQuestion: string | null; finished: boolean };
+      let response: {
+        feedback: string;
+        score: number;
+        nextQuestion: string | null;
+        finished: boolean;
+        summaryMarkdown?: string | null;
+        overallScore10?: number | null;
+      };
       if (hasSupabase && supabase && !session.id.startsWith('mock-session')) {
         const { data, error } = await supabase.functions.invoke<typeof response>('continue-interview', {
           body: { sessionId: session.id, answer },
@@ -5184,16 +5273,23 @@ function InterviewHistorySession({
 
       const fbClean = stripFeedbackTrailingQuestionsForDelivery(response.feedback, response.nextQuestion);
 
-      setMetrics((current) => ({ ...current, lastInterviewScore: response.score }));
+      const scoreForMetrics = response.overallScore10 ?? response.score;
+      setMetrics((current) => ({ ...current, lastInterviewScore: scoreForMetrics }));
+      const tail: Message[] = [];
+      if (response.nextQuestion?.trim()) {
+        tail.push({ id: id(), role: 'assistant', content: response.nextQuestion.trim() });
+      } else if (response.finished && response.summaryMarkdown?.trim()) {
+        tail.push({ id: id(), role: 'assistant', content: response.summaryMarkdown.trim() });
+      } else if (response.finished) {
+        tail.push({ id: id(), role: 'assistant', content: closingLine });
+      }
       const nextMessages: Message[] = [
         ...answeredMessages,
         { id: id(), role: 'assistant', content: fbClean, score: response.score },
-        ...(response.nextQuestion
-          ? [{ id: id(), role: 'assistant' as const, content: response.nextQuestion }]
-          : [{ id: id(), role: 'assistant' as const, content: 'That completes this mock interview. Great work!' }]),
+        ...tail,
       ];
       setMessages(nextMessages);
-      saveHistory(nextMessages, response);
+      saveHistory(nextMessages, { score: scoreForMetrics, finished: response.finished });
 
       if (hasSupabase && supabase && !session.id.startsWith('mock-session')) {
         void supabase.functions.invoke('save-interview-session', {
@@ -5203,8 +5299,12 @@ function InterviewHistorySession({
             profile: buildUserProfile(profile, user),
             messages: nextMessages.map((message) => ({ role: message.role, content: message.content, score: message.score })),
             status: response.finished ? 'completed' : 'active',
-            score: response.score * 10,
-            feedback: { latestScore: response.score },
+            score: Math.min(100, Math.max(0, Math.round(scoreForMetrics * 10))),
+            feedback: {
+              latestScore: response.score,
+              overallScore10: response.overallScore10 ?? null,
+              summaryPreview: response.summaryMarkdown?.slice(0, 400) ?? null,
+            },
           },
         });
       }
@@ -5606,6 +5706,8 @@ function mockContinue(userAnswerCount: number, professionLabel: string) {
       score: 9,
       nextQuestion: null,
       finished: true,
+      summaryMarkdown: null as string | null,
+      overallScore10: null as number | null,
     };
   }
   const questions = [
@@ -5622,6 +5724,8 @@ function mockContinue(userAnswerCount: number, professionLabel: string) {
     score: Math.min(5 + userAnswerCount, 10),
     nextQuestion,
     finished: nextQuestion === null,
+    summaryMarkdown: null as string | null,
+    overallScore10: null as number | null,
   };
 }
 
@@ -5644,8 +5748,22 @@ function normalizeStartInterviewResponse(value: unknown, profile: ProfileState) 
   };
 }
 
+function intervieweeFirstName(profile: ProfileState, user?: User | null): string {
+  const raw = (profile.professionalProfile.fullName || (user ? displayNameFor(user) : '') || '').trim();
+  const t = raw.split(/\s+/).filter(Boolean)[0] ?? '';
+  if (!t || t.toLowerCase() === 'user') return '';
+  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+}
+
+function interviewClosingLine(profile: ProfileState, user?: User | null): string {
+  const fn = intervieweeFirstName(profile, user);
+  return fn
+    ? `Thanks, ${fn} — that completes this mock interview. Great work!`
+    : 'That completes this mock interview. Great work!';
+}
+
 function normalizeContinueInterviewResponse(value: unknown, userAnswerCount: number, profile: ProfileState) {
-  const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const data = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const fallback = mockContinue(
     userAnswerCount,
     profile.professionLabel || profile.professionalProfile.currentDesignation || ''
@@ -5654,11 +5772,22 @@ function normalizeContinueInterviewResponse(value: unknown, userAnswerCount: num
   const nextQuestion = typeof data.nextQuestion === 'string' && data.nextQuestion.trim()
     ? data.nextQuestion.trim()
     : null;
+  const summaryMarkdown =
+    typeof data.summaryMarkdown === 'string' && data.summaryMarkdown.trim()
+      ? data.summaryMarkdown.trim()
+      : null;
+  const overallScore10 =
+    typeof data.overallScore10 === 'number' && Number.isFinite(data.overallScore10) ? data.overallScore10 : null;
+  const finished =
+    data.finished === true ||
+    (!!summaryMarkdown && !nextQuestion);
   return {
     feedback: safeText(data.feedback, fallback.feedback),
-    score: Math.min(10, Math.max(1, Math.round(rawScore))),
+    score: Math.min(10, Math.max(0, Math.round(rawScore))),
     nextQuestion,
-    finished: data.finished === true || !nextQuestion,
+    finished,
+    summaryMarkdown,
+    overallScore10,
   };
 }
 

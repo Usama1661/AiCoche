@@ -1,7 +1,6 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
-import { firstQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
   experienceLabel,
@@ -10,7 +9,7 @@ import {
   professionTitle,
   stripInternalInterviewFields,
 } from '../_shared/interviewProfile.ts';
-import { chatCompletionJson } from '../_shared/openai.ts';
+import { generateInterviewQuestionQueue } from '../_shared/interviewFlow.ts';
 import { isResponse, requireAuth } from '../_shared/supabase.ts';
 
 type UserProfile = Record<string, unknown>;
@@ -38,50 +37,17 @@ Deno.serve(async (req) => {
     const contextBlock = buildInterviewContextLines(profile, metrics ?? null);
     const expDesc = experienceLabel(profile.experience);
     const candidateFirstName = interviewCandidateFirstName(profile, user);
-
-    const system = `You are an expert hiring manager running a realistic mock interview for this ONE candidate.
-
-Target role / field: ${profession}
-
-Your task: produce ONLY valid JSON:
-{"question":"..."}
-${
-      candidateFirstName
-        ? `\nPersonalization: candidate first name is "${candidateFirstName}". If it fits naturally, use it at most once in this opening question; otherwise address them as "you".\n`
-        : ''
-    }
-${firstQuestionPolicyBlock(profession, expDesc, 'typed')}
-
-Candidate context (use this):
----
-${contextBlock}
----`;
-
     const profileJson = JSON.stringify(stripInternalInterviewFields(profile)).slice(0, 14_000);
 
-    let question =
-      `To start us off in plain terms — how did you get interested in ${profession}, and which part of your background (role, project, or skill from your profile) best shows where you want to go next?`;
+    const plan = await generateInterviewQuestionQueue({
+      profession,
+      candidateSummary: `${contextBlock}\nInterview depth: ${expDesc}`,
+      profileJson,
+      candidateFirstName,
+    });
 
-    const raw = await chatCompletionJson(
-      [
-        { role: 'system', content: system },
-        {
-          role: 'user',
-          content:
-            `Generate the first interview question.\n\nStructured profile JSON (extra detail):\n${profileJson}`,
-        },
-      ],
-      { temperature: 0.45 },
-    );
-
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as { question?: string };
-        if (parsed.question?.trim()) question = parsed.question.trim();
-      } catch {
-        /* use default */
-      }
-    }
+    const question = plan.queue[0]?.question?.trim() ||
+      `To start us off in plain terms — how did you get interested in ${profession}, and which part of your background best shows where you want to go next?`;
 
     const storedProfile = {
       ...profile,
@@ -95,6 +61,7 @@ ${contextBlock}
         profile: storedProfile as Record<string, unknown>,
         messages: [{ role: 'assistant', content: question }],
         turn_count: 0,
+        interview_plan: plan as unknown as Record<string, unknown>,
       })
       .select('id')
       .single();

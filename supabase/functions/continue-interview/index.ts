@@ -16,13 +16,20 @@ import {
   readInterviewMetrics,
   stripInternalInterviewFields,
 } from '../_shared/interviewProfile.ts';
+import {
+  evaluateInterviewAnswer,
+  generateInterviewSummary,
+  INTERVIEW_MAX_TURNS,
+  parseInterviewPlan,
+  turnLogFromEvaluation,
+} from '../_shared/interviewFlow.ts';
 import { chatCompletionJson } from '../_shared/openai.ts';
 import { stripFeedbackTrailingQuestionsForDelivery } from '../_shared/interviewFeedbackSanitize.ts';
 import { isResponse, requireAuth } from '../_shared/supabase.ts';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
-const MAX_TURNS = 6;
+const MAX_TURNS = INTERVIEW_MAX_TURNS;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -45,7 +52,7 @@ Deno.serve(async (req) => {
 
     const { data: row, error: fetchErr } = await supabase
       .from('interview_sessions')
-      .select('id, profile, messages, turn_count')
+      .select('id, profile, messages, turn_count, interview_plan')
       .eq('id', sessionId)
       .eq('user_id', user.id)
       .single();
@@ -67,6 +74,73 @@ Deno.serve(async (req) => {
     const candidateFirstName = interviewCandidateFirstName(profile, user);
     const useNameThisTurn =
       tentativeTurn < MAX_TURNS && interviewShouldAddressByNameThisTurn(String(row.id), tentativeTurn);
+
+    const structuredPlan = parseInterviewPlan(row.interview_plan);
+
+    if (structuredPlan && structuredPlan.queue.length >= MAX_TURNS) {
+      const qIdx = Math.min(Math.max(0, Number(row.turn_count)), MAX_TURNS - 1);
+      const qMeta = structuredPlan.queue[qIdx] ?? structuredPlan.queue[0];
+      const nextFromQueue =
+        tentativeTurn < MAX_TURNS ? structuredPlan.queue[tentativeTurn]?.question?.trim() ?? null : null;
+
+      const ev = await evaluateInterviewAnswer({
+        profession,
+        interviewQuestion: qMeta.question,
+        candidateAnswer: answer.trim(),
+        candidateSummary,
+        nextQuestionPreview: nextFromQueue,
+      });
+
+      const turn = turnLogFromEvaluation({ meta: qMeta, userAnswer: answer.trim(), ev });
+      const turns = [...structuredPlan.turns, turn];
+      let nextPlan = { ...structuredPlan, turns };
+
+      let feedback = ev.feedback;
+      const score = ev.score;
+      let nextQuestion: string | null = nextFromQueue;
+      let finished = tentativeTurn >= MAX_TURNS;
+      let summaryMarkdown: string | null = null;
+      let overallScore10: number | null = null;
+
+      messages.push({ role: 'assistant', content: feedback });
+
+      if (!finished && nextQuestion) {
+        messages.push({ role: 'assistant', content: nextQuestion });
+      } else {
+        nextQuestion = null;
+        const { summary, markdown } = await generateInterviewSummary({
+          profession,
+          turns,
+          candidateFirstName,
+        });
+        nextPlan = { ...nextPlan, summary };
+        summaryMarkdown = markdown;
+        overallScore10 = summary.overallScore;
+        messages.push({ role: 'assistant', content: markdown });
+      }
+
+      const { error: upErr } = await supabase
+        .from('interview_sessions')
+        .update({
+          messages,
+          turn_count: tentativeTurn,
+          interview_plan: nextPlan as unknown as Record<string, unknown>,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', sessionId)
+        .eq('user_id', user.id);
+
+      if (upErr) throw upErr;
+
+      return jsonResponse({
+        feedback,
+        score,
+        nextQuestion,
+        finished,
+        summaryMarkdown,
+        overallScore10,
+      });
+    }
 
     let feedback =
       'Thanks for the detail. Try to tie your example to a measurable outcome next time.';
@@ -96,14 +170,14 @@ Deno.serve(async (req) => {
             content: `Transcript:\n${transcriptEnd.slice(-9000)}\nGive closing feedback and score this final answer only.`,
           },
         ],
-        { temperature: 0.35 },
+        { temperature: 0.35, timeoutMs: 50_000 },
       );
       if (rawEnd) {
         try {
           const parsedEnd = JSON.parse(rawEnd) as { feedback?: string; score?: number };
           if (parsedEnd.feedback) feedback = parsedEnd.feedback;
           if (typeof parsedEnd.score === 'number') {
-            score = Math.min(10, Math.max(1, Math.round(parsedEnd.score)));
+            score = Math.min(10, Math.max(0, Math.round(parsedEnd.score)));
           }
         } catch {
           feedback =
@@ -124,14 +198,18 @@ Deno.serve(async (req) => {
         if (redirect) {
           feedback = NON_ANSWER_FEEDBACK;
           score = 1;
-          nextQuestion = pendingQuestion;
+          const nqFollow =
+            structuredPlan && structuredPlan.queue.length > tentativeTurn
+              ? structuredPlan.queue[tentativeTurn]?.question?.trim()
+              : null;
+          nextQuestion = (nqFollow && nqFollow.length > 0 ? nqFollow : pendingQuestion) ?? pendingQuestion;
           finished = false;
           messages.push({ role: 'assistant', content: nextQuestion });
           const { error: upRedirect } = await supabase
             .from('interview_sessions')
             .update({
               messages,
-              turn_count: row.turn_count,
+              turn_count: tentativeTurn,
               updated_at: new Date().toISOString(),
             })
             .eq('id', sessionId)
@@ -210,7 +288,7 @@ Give feedback, score, and next question.`;
           { role: 'system', content: system },
           { role: 'user', content: userPrompt },
         ],
-        { temperature: 0.4 }
+        { temperature: 0.4, timeoutMs: 55_000, retryOnceOnHttpError: true },
       );
 
       if (raw) {
@@ -223,7 +301,7 @@ Give feedback, score, and next question.`;
           };
           if (parsed.feedback) feedback = parsed.feedback;
           if (typeof parsed.score === 'number') {
-            score = Math.min(10, Math.max(1, Math.round(parsed.score)));
+            score = Math.min(10, Math.max(0, Math.round(parsed.score)));
           }
           if (parsed.finished === true || parsed.nextQuestion === null || parsed.nextQuestion === '') {
             finished = true;

@@ -8,18 +8,35 @@ export type ContinueInterviewStreamResult = {
   nextQuestion: string | null;
   score: number;
   finished: boolean;
+  summaryMarkdown?: string | null;
+  overallScore10?: number | null;
 };
 
 export type SpeakReadyPayload = {
   feedback: string;
   nextQuestion: string | null;
   finished: boolean;
+  summaryMarkdown?: string | null;
 };
 
 type SsePayload =
   | { t: 'd'; c: string }
-  | { t: 'ready'; feedback: string; nextQuestion: string | null; finished: boolean }
-  | { t: 'done'; feedback: string; nextQuestion: string | null; score: number; finished: boolean }
+  | {
+      t: 'ready';
+      feedback: string;
+      nextQuestion: string | null;
+      finished: boolean;
+      summaryMarkdown?: string | null;
+    }
+  | {
+      t: 'done';
+      feedback: string;
+      nextQuestion: string | null;
+      score: number;
+      finished: boolean;
+      summaryMarkdown?: string | null;
+      overallScore10?: number | null;
+    }
   | { t: 'error'; message: string };
 
 export async function consumeContinueInterviewStream(options: {
@@ -82,6 +99,7 @@ export async function consumeContinueInterviewStream(options: {
             feedback: payload.feedback,
             nextQuestion: payload.nextQuestion,
             finished: payload.finished,
+            summaryMarkdown: payload.summaryMarkdown ?? null,
           });
         } else if (payload.t === 'done') {
           donePayload = {
@@ -89,6 +107,8 @@ export async function consumeContinueInterviewStream(options: {
             nextQuestion: payload.nextQuestion,
             score: payload.score,
             finished: payload.finished,
+            summaryMarkdown: payload.summaryMarkdown ?? null,
+            overallScore10: payload.overallScore10 ?? null,
           };
         }
       }

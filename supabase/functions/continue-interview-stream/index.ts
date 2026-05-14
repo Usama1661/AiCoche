@@ -16,14 +16,34 @@ import {
   readInterviewMetrics,
   stripInternalInterviewFields,
 } from '../_shared/interviewProfile.ts';
+import {
+  evaluateInterviewAnswer,
+  generateInterviewSummary,
+  INTERVIEW_MAX_TURNS,
+  parseInterviewPlan,
+  turnLogFromEvaluation,
+} from '../_shared/interviewFlow.ts';
 import { chatCompletionJson, chatCompletionTextStream } from '../_shared/openai.ts';
 import { stripFeedbackTrailingQuestionsForDelivery } from '../_shared/interviewFeedbackSanitize.ts';
 import { isResponse, requireAuth } from '../_shared/supabase.ts';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
-const MAX_TURNS = 6;
+const MAX_TURNS = INTERVIEW_MAX_TURNS;
 const SPLIT = '<<<SPLIT>>>';
+
+function sseLine(obj: unknown): Uint8Array {
+  return new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`);
+}
+
+async function* chunkTextStream(text: string): AsyncGenerator<string> {
+  const t = text.replace(/\r\n/g, '\n').trim();
+  if (!t) return;
+  const step = 32;
+  for (let i = 0; i < t.length; i += step) {
+    yield t.slice(i, i + step);
+  }
+}
 
 function parseStreamedReply(
   fullRaw: string,
@@ -53,39 +73,6 @@ function parseStreamedReply(
   return { feedback: full, nextQuestion: null };
 }
 
-async function scoreTurnAnswer(params: {
-  profession: string;
-  candidateAnswer: string;
-  interviewerText: string;
-}): Promise<number> {
-  const raw = await chatCompletionJson(
-    [
-      {
-        role: 'system',
-        content:
-          'You score one mock interview turn. Respond ONLY JSON: {"score": integer from 1 to 10} based on clarity, relevance, and depth of the candidate answer alone. If they only sent a greeting or unrelated filler with no clear intent, score 1-2. If they honestly said they do not know or have no answer (including messy speech-to-text), score 4-7 for clear transparency — not as a failed attempt to bluff. If they said they have not worked on it yet, it is in progress, or they will explain later (experience gap / deferral), score 4-7 when that intent is clear. If they commented on interview flow (e.g. two questions at once, confusion about which to answer), score 6-9 for a clear, reasonable process comment — not as dodging the topic. If they asked for easier, shorter, or simpler questions; said questions were too hard or difficult; or asked for slower pace, repeat, or clarification (including messy speech-to-text), score 6-9 based on how clear and reasonable the request was — not as a failed technical answer. If they attempted a substantive answer (even with transcription errors), score on substance. Never infer substance from the interviewer text alone.',
-      },
-      {
-        role: 'user',
-        content: `Role context: ${params.profession}\n\nCandidate answer:\n${params.candidateAnswer.slice(0, 4000)}\n\nInterviewer just said (feedback and optional follow-up):\n${params.interviewerText.slice(0, 4000)}`,
-      },
-    ],
-    { temperature: 0.15, maxOutputTokens: 64 }
-  );
-  if (!raw) return 7;
-  try {
-    const p = JSON.parse(raw) as { score?: number };
-    if (typeof p.score === 'number') return Math.min(10, Math.max(1, Math.round(p.score)));
-  } catch {
-    /* ignore */
-  }
-  return 7;
-}
-
-function sseLine(obj: unknown): Uint8Array {
-  return new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`);
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -113,7 +100,7 @@ Deno.serve(async (req) => {
 
     const { data: row, error: fetchErr } = await supabase
       .from('interview_sessions')
-      .select('id, profile, messages, turn_count')
+      .select('id, profile, messages, turn_count, interview_plan')
       .eq('id', sessionId)
       .eq('user_id', user.id)
       .single();
@@ -139,13 +126,96 @@ Deno.serve(async (req) => {
     const useNameThisTurn =
       tentativeTurn < MAX_TURNS && interviewShouldAddressByNameThisTurn(String(row.id), tentativeTurn);
 
-    const transcript = messages
-      .map((m) => `${m.role === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`)
-      .join('\n');
+    const structuredPlan = parseInterviewPlan(row.interview_plan);
 
-    const profileJson = JSON.stringify(stripInternalInterviewFields(profile)).slice(0, 10_000);
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (obj: unknown) => controller.enqueue(sseLine(obj));
+        try {
+          if (structuredPlan && structuredPlan.queue.length >= MAX_TURNS) {
+            const qIdx = Math.min(Math.max(0, Number(row.turn_count)), MAX_TURNS - 1);
+            const qMeta = structuredPlan.queue[qIdx] ?? structuredPlan.queue[0];
+            const nextFromQueue =
+              tentativeTurn < MAX_TURNS ? structuredPlan.queue[tentativeTurn]?.question?.trim() ?? null : null;
 
-    const userPrompt = `Candidate summary (use for role fit and depth):
+            const ev = await evaluateInterviewAnswer({
+              profession,
+              interviewQuestion: qMeta.question,
+              candidateAnswer: answer.trim(),
+              candidateSummary,
+              nextQuestionPreview: nextFromQueue,
+            });
+
+            const turn = turnLogFromEvaluation({ meta: qMeta, userAnswer: answer.trim(), ev });
+            const turns = [...structuredPlan.turns, turn];
+            let nextPlan = { ...structuredPlan, turns };
+
+            const feedback = ev.feedback;
+            const score = ev.score;
+            const nextQuestion = tentativeTurn < MAX_TURNS ? nextFromQueue : null;
+            const finished = tentativeTurn >= MAX_TURNS;
+
+            for await (const chunk of chunkTextStream(feedback)) {
+              send({ t: 'd', c: chunk });
+            }
+
+            let summaryMd: string | null = null;
+            let overall: number | null = null;
+
+            messages.push({ role: 'assistant', content: feedback });
+
+            if (!finished && nextQuestion) {
+              messages.push({ role: 'assistant', content: nextQuestion });
+            } else {
+              const { summary, markdown } = await generateInterviewSummary({
+                profession,
+                turns,
+                candidateFirstName,
+              });
+              nextPlan = { ...nextPlan, summary };
+              summaryMd = markdown;
+              overall = summary.overallScore;
+              messages.push({ role: 'assistant', content: markdown });
+            }
+
+            const { error: upErr } = await supabase
+              .from('interview_sessions')
+              .update({
+                messages,
+                turn_count: tentativeTurn,
+                interview_plan: nextPlan as unknown as Record<string, unknown>,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', sessionId)
+              .eq('user_id', user.id);
+
+            if (upErr) {
+              send({ t: 'error', message: upErr.message });
+              controller.close();
+              return;
+            }
+
+            send({ t: 'ready', feedback, nextQuestion, finished, summaryMarkdown: summaryMd });
+            send({
+              t: 'done',
+              feedback,
+              nextQuestion,
+              score,
+              finished,
+              summaryMarkdown: summaryMd,
+              overallScore10: overall,
+            });
+            controller.close();
+            return;
+          }
+
+          const transcript = messages
+            .map((m) => `${m.role === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`)
+            .join('\n');
+
+          const profileJson = JSON.stringify(stripInternalInterviewFields(profile)).slice(0, 10_000);
+
+          const userPrompt = `Candidate summary (use for role fit and depth):
 ---
 ${candidateSummary}
 ---
@@ -158,36 +228,39 @@ ${profileJson}
 
 Reply as instructed in the system message.`;
 
-    const isClosingOnly = tentativeTurn >= MAX_TURNS;
+          const isClosingOnly = tentativeTurn >= MAX_TURNS;
 
-    const nameDirectives =
-      candidateFirstName.length > 0
-        ? `Personalization — candidate first name: "${candidateFirstName}". ${
-            useNameThisTurn
-              ? 'This turn you MAY use their first name at most once if it sounds natural (often at the very start of the spoken block after the delimiter when introducing the next question). Never use the name more than once in the entire reply. Do not add honorifics.'
-              : 'This turn do not address them by name; use neutral "you" only.'
-          }`
-        : '';
+          const nameDirectives =
+            candidateFirstName.length > 0
+              ? `Personalization — candidate first name: "${candidateFirstName}". ${
+                  useNameThisTurn
+                    ? 'This turn you MAY use their first name at most once if it sounds natural (often at the very start of the spoken block after the delimiter when introducing the next question). Never use the name more than once in the entire reply. Do not add honorifics.'
+                    : 'This turn do not address them by name; use neutral "you" only.'
+                }`
+              : '';
 
-    const streamMessages = isClosingOnly
-      ? [
-          {
-            role: 'system' as const,
-            content: `Mock interview for ${profession} — final candidate answer (question ${MAX_TURNS} of ${MAX_TURNS}). 
+          const streamMessages = isClosingOnly
+            ? [
+                {
+                  role: 'system' as const,
+                  content: `Mock interview for ${profession} — final candidate answer (question ${MAX_TURNS} of ${MAX_TURNS}). 
 You are the interviewer. Stream only your spoken closing: 2-4 sentences of feedback on their final answer. 
 Comment ONLY on what they actually said — no fake praise for content missing from their reply.
 No JSON, no bullet labels, no delimiter lines — plain speech only.${
-              candidateFirstName
-                ? ` Candidate first name: "${candidateFirstName}". Prefer opening this closing with their first name once (warm, professional), at most one use in the whole closing; if it would sound odd, use neutral "you" instead.`
-                : ''
-            }`,
-          },
-          { role: 'user' as const, content: `Transcript:\n${transcript.slice(-9000)}\n\nGive closing feedback only.` },
-        ]
-      : [
-          {
-            role: 'system' as const,
-            content: `You are a seasoned interviewer hiring for: ${profession}.
+                    candidateFirstName
+                      ? ` Candidate first name: "${candidateFirstName}". Prefer opening this closing with their first name once (warm, professional), at most one use in the whole closing; if it would sound odd, use neutral "you" instead.`
+                      : ''
+                  }`,
+                },
+                {
+                  role: 'user' as const,
+                  content: `Transcript:\n${transcript.slice(-9000)}\n\nGive closing feedback only.`,
+                },
+              ]
+            : [
+                {
+                  role: 'system' as const,
+                  content: `You are a seasoned interviewer hiring for: ${profession}.
 
 The candidate just answered your previous question.
 
@@ -211,16 +284,12 @@ Rules:
 - To end the interview after this turn with no follow-up question, output ${SPLIT} on its own line, then a second line with only NONE.
 
 ${continueNextQuestionPolicyBlock(profession, tentativeTurn, promptStyle)}`,
-          },
-          { role: 'user' as const, content: userPrompt },
-        ];
+                },
+                { role: 'user' as const, content: userPrompt },
+              ];
 
-    const temperature = isClosingOnly ? 0.35 : 0.4;
+          const temperature = isClosingOnly ? 0.35 : 0.28;
 
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const send = (obj: unknown) => controller.enqueue(sseLine(obj));
-        try {
           const pendingQuestion = lastAssistantQuestion(messages);
           if (!isClosingOnly && pendingQuestion) {
             const redirect = await shouldRedirectNonAnswer({
@@ -289,6 +358,54 @@ ${continueNextQuestionPolicyBlock(profession, tentativeTurn, promptStyle)}`,
             messages.push({ role: 'assistant', content: nq });
           }
 
+          let score = 7;
+          if (!isClosingOnly) {
+            const rawScore = await chatCompletionJson(
+              [
+                {
+                  role: 'system',
+                  content:
+                    'You score one mock interview turn. Respond ONLY JSON: {"score": integer from 0 to 10} based on clarity, relevance, and depth of the candidate answer alone. Use 0 for empty or pure I-dont-know with no substance.',
+                },
+                {
+                  role: 'user',
+                  content: `Role context: ${profession}\n\nCandidate answer:\n${answer.trim().slice(0, 4000)}\n\nInterviewer just said (feedback and optional follow-up):\n${(nq ? `${fb}\n\n${nq}` : fb).slice(0, 4000)}`,
+                },
+              ],
+              { temperature: 0.15, maxOutputTokens: 64, timeoutMs: 25_000 },
+            );
+            if (rawScore) {
+              try {
+                const p = JSON.parse(rawScore) as { score?: number };
+                if (typeof p.score === 'number') score = Math.min(10, Math.max(0, Math.round(p.score)));
+              } catch {
+                /* ignore */
+              }
+            }
+          } else {
+            const rawScore = await chatCompletionJson(
+              [
+                {
+                  role: 'system',
+                  content: 'Respond ONLY JSON: {"score": integer from 0 to 10} for the final answer quality.',
+                },
+                {
+                  role: 'user',
+                  content: `Role: ${profession}\nFinal answer context:\n${answer.trim().slice(0, 4000)}\n\nClosing feedback:\n${fb.slice(0, 4000)}`,
+                },
+              ],
+              { temperature: 0.15, maxOutputTokens: 64, timeoutMs: 25_000 },
+            );
+            if (rawScore) {
+              try {
+                const p = JSON.parse(rawScore) as { score?: number };
+                if (typeof p.score === 'number') score = Math.min(10, Math.max(0, Math.round(p.score)));
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+
           const { error: upErr } = await supabase
             .from('interview_sessions')
             .update({
@@ -305,16 +422,7 @@ ${continueNextQuestionPolicyBlock(profession, tentativeTurn, promptStyle)}`,
             return;
           }
 
-          /** Lets the client start TTS while the small scoring model still runs. */
           send({ t: 'ready', feedback: fb, nextQuestion: nq, finished });
-
-          const interviewerForScore = nq ? `${fb}\n\n${nq}` : fb;
-          const score = await scoreTurnAnswer({
-            profession,
-            candidateAnswer: answer.trim(),
-            interviewerText: interviewerForScore,
-          });
-
           send({
             t: 'done',
             feedback: fb,

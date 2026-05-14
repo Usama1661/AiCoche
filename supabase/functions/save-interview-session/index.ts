@@ -11,6 +11,7 @@ type Body = {
   status?: 'active' | 'completed' | 'abandoned';
   score?: number;
   feedback?: Record<string, unknown>;
+  interview_plan?: Record<string, unknown>;
 };
 
 Deno.serve(async (req) => {
@@ -21,7 +22,7 @@ Deno.serve(async (req) => {
     const { supabase, user } = await requireAuth(req);
     const body = await readJson<Body>(req);
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       user_id: user.id,
       title: body.title ?? 'Interview practice',
       profile: body.profile ?? {},
@@ -33,6 +34,10 @@ Deno.serve(async (req) => {
       score: typeof body.score === 'number' ? Math.min(100, Math.max(0, Math.round(body.score))) : null,
       feedback: body.feedback ?? {},
     };
+
+    if (body.interview_plan && typeof body.interview_plan === 'object') {
+      payload.interview_plan = body.interview_plan;
+    }
 
     const query = body.sessionId
       ? supabase.from('interview_sessions').update(payload).eq('id', body.sessionId).eq('user_id', user.id)

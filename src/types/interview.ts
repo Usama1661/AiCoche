@@ -11,6 +11,8 @@ export type ContinueInterviewResponse = {
   score: number;
   nextQuestion: string | null;
   finished?: boolean;
+  summaryMarkdown?: string | null;
+  overallScore10?: number | null;
 };
 
 export type ChatRole = 'assistant' | 'user' | 'system';

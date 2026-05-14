@@ -1,7 +1,6 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders } from '../_shared/cors.ts';
-import { firstQuestionPolicyBlock } from '../_shared/interviewQuestionPolicy.ts';
 import type { InterviewPromptStyle } from '../_shared/interviewQuestionPolicy.ts';
 import {
   buildInterviewContextLines,
@@ -11,7 +10,7 @@ import {
   professionTitle,
   stripInternalInterviewFields,
 } from '../_shared/interviewProfile.ts';
-import { chatCompletionTextStream } from '../_shared/openai.ts';
+import { generateInterviewQuestionQueue } from '../_shared/interviewFlow.ts';
 import { isResponse, requireAuth } from '../_shared/supabase.ts';
 
 type UserProfile = Record<string, unknown>;
@@ -22,6 +21,16 @@ function text(value: unknown): string {
 
 function sseLine(obj: unknown): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`);
+}
+
+/** Stream plain text to the client in small chunks (question is already fully known). */
+async function* chunkTextStream(text: string): AsyncGenerator<string> {
+  const t = text.replace(/\r\n/g, '\n').trim();
+  if (!t) return;
+  const step = 28;
+  for (let i = 0; i < t.length; i += step) {
+    yield t.slice(i, i + step);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -40,7 +49,6 @@ Deno.serve(async (req) => {
     const body = (await req.json()) as {
       profile?: UserProfile;
       metrics?: Record<string, unknown> | null;
-      /** Voice mock interview only — enables Normal / Advanced question mix in prompts. */
       voiceInterview?: boolean;
       interviewLevel?: string;
     };
@@ -56,6 +64,7 @@ Deno.serve(async (req) => {
     const contextBlock = buildInterviewContextLines(profile, metrics ?? null);
     const expDesc = experienceLabel(profile.experience);
     const candidateFirstName = interviewCandidateFirstName(profile, user);
+    const profileJson = JSON.stringify(stripInternalInterviewFields(profile)).slice(0, 14_000);
 
     const voiceInterview = body.voiceInterview === true;
     const level = text(body.interviewLevel).toLowerCase() === 'advanced' ? 'advanced' : 'normal';
@@ -75,35 +84,6 @@ Deno.serve(async (req) => {
           ? 'Voice interview · Normal (realistic hiring mix)'
           : 'Typed chat interview';
 
-    const system = `You are an expert hiring manager running a realistic mock interview for this ONE candidate.
-
-Target role / field: ${profession}
-Session mode: ${modeHint}
-
-Stream ONLY the first interview question as plain text — one continuous question the interviewer would ask aloud.
-No JSON. No preamble like "Here is the question:" or labels. No quotation marks wrapping the whole question.
-${
-      candidateFirstName
-        ? `\nPersonalization: candidate first name is "${candidateFirstName}". If it fits naturally, use it at most once in this opening question; otherwise address them as "you".\n`
-        : ''
-    }
-${firstQuestionPolicyBlock(profession, expDesc, promptStyle)}
-
-Candidate context (use this):
----
-${contextBlock}
----`;
-
-    const profileJson = JSON.stringify(stripInternalInterviewFields(profile)).slice(0, 14_000);
-
-    const streamMessages = [
-      { role: 'system' as const, content: system },
-      {
-        role: 'user' as const,
-        content: `Generate the first interview question.\n\nStructured profile JSON (extra detail):\n${profileJson}`,
-      },
-    ];
-
     const storedProfile = {
       ...profile,
       [INTERVIEW_METRICS_KEY]: metrics ?? {},
@@ -114,13 +94,18 @@ ${contextBlock}
       async start(controller) {
         const send = (obj: unknown) => controller.enqueue(sseLine(obj));
         try {
-          let full = '';
-          for await (const chunk of chatCompletionTextStream(streamMessages, { temperature: 0.45 })) {
-            full += chunk;
+          const plan = await generateInterviewQuestionQueue({
+            profession,
+            candidateSummary: `${contextBlock}\nSession mode: ${modeHint}\nInterview depth: ${expDesc}`,
+            profileJson,
+            candidateFirstName,
+          });
+
+          const question = plan.queue[0]?.question?.trim() || defaultQuestion;
+
+          for await (const chunk of chunkTextStream(question)) {
             send({ t: 'd', c: chunk });
           }
-
-          const question = full.replace(/\r\n/g, '\n').trim() || defaultQuestion;
 
           const { data, error } = await supabase
             .from('interview_sessions')
@@ -129,6 +114,7 @@ ${contextBlock}
               profile: storedProfile as Record<string, unknown>,
               messages: [{ role: 'assistant', content: question }],
               turn_count: 0,
+              interview_plan: plan as unknown as Record<string, unknown>,
             })
             .select('id')
             .single();

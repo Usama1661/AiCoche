@@ -109,13 +109,40 @@ export async function synthesizeSpeechMp3(text: string, voiceOverride?: string):
   return new Uint8Array(await res.arrayBuffer());
 }
 
-export async function chatCompletionJson(
-  messages: ChatMsg[],
-  opts?: { temperature?: number; maxOutputTokens?: number }
-): Promise<string | null> {
+const DEFAULT_CHAT_TIMEOUT_MS = 55_000;
+
+async function postChatCompletions(body: Record<string, unknown>, timeoutMs: number): Promise<Response | null> {
   const key = Deno.env.get('OPENAI_API_KEY');
   if (!key) return null;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      console.error('OpenAI chat timeout', timeoutMs);
+    } else {
+      console.error('OpenAI chat fetch error', e);
+    }
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function chatCompletionJson(
+  messages: ChatMsg[],
+  opts?: { temperature?: number; maxOutputTokens?: number; timeoutMs?: number; retryOnceOnHttpError?: boolean }
+): Promise<string | null> {
   const body: Record<string, unknown> = {
     model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4o-mini',
     messages,
@@ -126,14 +153,21 @@ export async function chatCompletionJson(
     body.max_tokens = opts.maxOutputTokens;
   }
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS;
+
+  const run = async () => postChatCompletions(body, timeoutMs);
+  let res = await run();
+  if (
+    opts?.retryOnceOnHttpError &&
+    res &&
+    !res.ok &&
+    (res.status >= 500 || res.status === 429)
+  ) {
+    await new Promise((r) => setTimeout(r, 400));
+    res = await run();
+  }
+
+  if (!res) return null;
 
   if (!res.ok) {
     const errText = await res.text();
@@ -150,24 +184,41 @@ export async function chatCompletionJson(
 /** Plain chat completion with `stream: true` — yields UTF-8 text deltas from the assistant. */
 export async function* chatCompletionTextStream(
   messages: ChatMsg[],
-  opts?: { temperature?: number }
+  opts?: { temperature?: number; timeoutMs?: number }
 ): AsyncGenerator<string, void, unknown> {
   const key = Deno.env.get('OPENAI_API_KEY');
   if (!key) return;
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4o-mini',
-      messages,
-      temperature: opts?.temperature ?? 0.4,
-      stream: true,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4o-mini',
+        messages,
+        temperature: opts?.temperature ?? 0.4,
+        stream: true,
+      }),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    clearTimeout(timer);
+    if (e instanceof Error && e.name === 'AbortError') {
+      console.error('OpenAI stream timeout', timeoutMs);
+    } else {
+      console.error('OpenAI stream fetch error', e);
+    }
+    return;
+  }
+  clearTimeout(timer);
 
   if (!res.ok || !res.body) {
     const errText = await res.text();

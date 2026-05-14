@@ -50,6 +50,8 @@ function mockContinue(_answer: string, professionLabel: string): ContinueIntervi
       score: 9,
       nextQuestion: null,
       finished: true,
+      summaryMarkdown: null,
+      overallScore10: null,
     };
   }
   const questions = [
@@ -67,6 +69,8 @@ function mockContinue(_answer: string, professionLabel: string): ContinueIntervi
     score: Math.min(5 + mockCounter, 10),
     nextQuestion: next,
     finished: next === null,
+    summaryMarkdown: null,
+    overallScore10: null,
   };
 }
 

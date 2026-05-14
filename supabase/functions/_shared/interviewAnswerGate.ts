@@ -80,7 +80,7 @@ export function isInterviewMetaOrAssistanceRequest(answer: string): boolean {
  */
 export function isHonestIDKOrNoAnswer(answer: string): boolean {
   const t = answer.trim();
-  if (t.length < 8) return false;
+  if (t.length < 4) return false;
   const s = normalizeSttGlitchTokens(t.toLowerCase().replace(/\s+/g, ' '));
 
   return (
@@ -92,7 +92,16 @@ export function isHonestIDKOrNoAnswer(answer: string): boolean {
     /\bno\s+answer\b.{0,60}\b(ques|question|this|that|it)\b/.test(s) ||
     /\b(haven'?t|have\s+not)\s+(learned|studied|covered|done|used|seen)\b/.test(s) ||
     /\b(not\s+familiar(\s+with)?|out\s+of\s+my\s+depth)\b/.test(s) ||
-    /\b(wouldn'?t|would\s+not)\s+know\s+(how|what)\b/.test(s)
+    /\b(wouldn'?t|would\s+not)\s+know\s+(how|what)\b/.test(s) ||
+    /\bpata\s+nahi\b/.test(s) ||
+    /\bmaloom\s+nahi\b/.test(s) ||
+    /\bmujh(e|y)\s+nahi\s+pata\b/.test(s) ||
+    /\bmujh(e|y)\s+nahi\s+maloom\b/.test(s) ||
+    /\bidea\s+nahi\b/.test(s) ||
+    /\b(?:main\s+)?nahi\s+jant[ia]\b/.test(s) ||
+    /\b(?:mein|main)\s+ko\s+nahi\s+pata\b/.test(s) ||
+    /\bsamajh\s+nahi\s+a[aiy]{1,2}\b/.test(s) ||
+    /\bno\s+knowledge\b/.test(s)
   );
 }
 
@@ -225,7 +234,7 @@ export async function shouldRedirectNonAnswer(params: {
         role: 'system',
         content: `You evaluate mock interview turns. Respond ONLY JSON: {"redirect":true|false}
 Set redirect=true when the candidate did NOT genuinely try to answer the interview QUESTION with substance. Use true for: bare greetings; empty filler; nonsense with no inferable intent; answers totally unrelated to what was asked; a lone refusal token ("none", "nothing", "skip") with no explanation.
-Set redirect=false when they honestly say they do not know, have no answer, are not sure, or have not covered that area — that is valid communication, not empty filler.
+Set redirect=false when they honestly say they do not know, have no answer, are not sure, or have not covered that area — that is valid communication, not empty filler. This includes Roman Urdu / Hinglish such as "pata nahi", "mujhe nahi pata", "idea nahi", "maloom nahi".
 Set redirect=false when they say they have not worked on it yet, it is in progress, or they will explain later (including broken grammar from speech-to-text) — that is substantive situational context, not empty filler. Treat the SAME intent across paraphrases: e.g. not involved / not assigned / wasn't on that / no hands-on / haven't gotten to it / need to ship it first / hasn't been built yet / will walk through after / circle back to this / "once it is done I will explain" / STT glitches like "don t have work on" — prefer redirect=false when unsure.
 Set redirect=false when they engage with the question even if brief, imperfect, or messy speech-to-text: infer intent generously when words are missing, misspelled, run together, or grammar is broken — if a reasonable hiring manager could tell they attempted an answer, do NOT redirect. When torn, prefer redirect=false.
 Set redirect=false when they ask to change HOW the interview runs (not the same as dodging): shorter/simpler/smaller/easier/basic questions, lower difficulty ("too hard", "very difficult"), slower pace, repetition, rephrasing, clarification, "too long", "too much", "didn't catch that", step-by-step — these must go to the interviewer model to comply, not block.
@@ -244,7 +253,7 @@ Candidate reply (may include speech-to-text errors):
 ${trimmed.slice(0, 3500)}`,
       },
     ],
-    { temperature: 0, maxOutputTokens: 96 },
+    { temperature: 0, maxOutputTokens: 96, timeoutMs: 22_000 },
   );
 
   if (!raw) return false;
