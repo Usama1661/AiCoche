@@ -1381,7 +1381,7 @@ export default function WebApp() {
             {view === 'home' ? <Home {...common} /> : null}
             {view === 'interview' ? <InterviewTab {...common} /> : null}
             {view === 'quiz' ? <Quiz {...common} /> : null}
-            {view === 'profile' ? <Profile {...common} onSignOut={signOut} /> : null}
+            {view === 'profile' ? <Profile {...common} /> : null}
             {view === 'settings' ? (
               <Settings
                 user={user}
@@ -2924,14 +2924,17 @@ function InterviewTab({
     setView('interview-session');
   }
 
+  function primeVoiceSessionFromUserGesture() {
+    primeVoiceInterviewPlaybackFromUserGesture();
+    primeInterviewSoundContextFromUserGesture();
+  }
+
   function tryStartVoiceInterview() {
     if (!canStart) {
       openUpgradeModal?.('interview');
       return;
     }
-    // Mobile Safari blocks TTS / neural `<audio>` unless playback was unlocked in this tap (before async work).
-    primeVoiceInterviewPlaybackFromUserGesture();
-    primeInterviewSoundContextFromUserGesture();
+    primeVoiceSessionFromUserGesture();
     setView('voice-interview');
   }
 
@@ -2998,7 +3001,11 @@ function InterviewTab({
         </div>
       </button>
       <div className="hero-card interview-voice-entry-card" style={{ borderStyle: 'dashed' }}>
-        <button type="button" className="interview-voice-entry-card__launch" onClick={tryStartVoiceInterview}>
+        <button
+          type="button"
+          className="interview-voice-entry-card__launch"
+          onPointerDown={primeVoiceSessionFromUserGesture}
+          onClick={tryStartVoiceInterview}>
           <div
             className="icon-box"
             style={{ color: 'white', background: 'color-mix(in srgb, var(--primary) 55%, var(--elevated))', flexShrink: 0 }}>
@@ -3572,7 +3579,7 @@ function Quiz({ user, profile, metrics, setMetrics, setView }: CommonProps) {
   );
 }
 
-function Profile({ user, profile, setProfile, usage, setUsage, setError, onSignOut }: CommonProps & { onSignOut: () => void }) {
+function Profile({ user, profile, setProfile, usage, setUsage, setError }: CommonProps) {
   const [modal, setModal] = useState<'skill' | 'tool' | 'project' | null>(null);
   const [draft, setDraft] = useState('');
   const [editOpen, setEditOpen] = useState(false);
@@ -3617,7 +3624,6 @@ function Profile({ user, profile, setProfile, usage, setUsage, setError, onSignO
     <section className="screen stack">
       <div className="row between">
         <h1 className="display">Profile</h1>
-        <Button variant="ghost" onClick={onSignOut}>Sign out</Button>
       </div>
       <div className="card row between">
         <div className="row">
@@ -4486,6 +4492,17 @@ function VoiceInterviewSession({
     const parts = texts.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean);
     if (!parts.length) return;
     if (!voiceCallActiveRef.current) return;
+    // iOS may route assistant audio to the earpiece while Web Speech / mic capture is active.
+    if (listening) {
+      try {
+        stopRecognitionRef.current?.();
+      } finally {
+        stopRecognitionRef.current = null;
+        setListening(false);
+        transcriptRef.current = '';
+        setLiveTranscript('');
+      }
+    }
     const leadIn = opts?.leadInMs ?? 0;
     setAiSpeaking(true);
     if (leadIn > 0) {
@@ -6960,6 +6977,63 @@ function WebHeader({
     { id: 'settings', label: 'Settings', icon: '' },
   ];
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scrollHidden, setScrollHidden] = useState(false);
+  const lastScrollYRef = useRef(0);
+  const scrollIdleTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+
+    lastScrollYRef.current = window.scrollY || document.documentElement.scrollTop;
+
+    const clearIdle = () => {
+      if (scrollIdleTimerRef.current != null) {
+        window.clearTimeout(scrollIdleTimerRef.current);
+        scrollIdleTimerRef.current = null;
+      }
+    };
+
+    const showHeader = () => setScrollHidden(false);
+    const hideHeader = () => setScrollHidden(true);
+
+    const onScroll = () => {
+      if (menuOpen) {
+        showHeader();
+        lastScrollYRef.current = window.scrollY || document.documentElement.scrollTop;
+        clearIdle();
+        return;
+      }
+
+      const y = window.scrollY || document.documentElement.scrollTop;
+      const dy = y - lastScrollYRef.current;
+      lastScrollYRef.current = y;
+
+      if (y < 40) {
+        showHeader();
+      } else if (dy > 6) {
+        hideHeader();
+      } else if (dy < -6) {
+        showHeader();
+      }
+
+      clearIdle();
+      scrollIdleTimerRef.current = window.setTimeout(() => {
+        showHeader();
+        scrollIdleTimerRef.current = null;
+      }, 240);
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      clearIdle();
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (menuOpen) setScrollHidden(false);
+  }, [menuOpen]);
 
   function navigate(view: View) {
     setView(view);
@@ -6976,7 +7050,7 @@ function WebHeader({
   }
 
   return (
-    <header className="site-header">
+    <header className={`site-header${scrollHidden ? ' site-header--scroll-hidden' : ''}`}>
       <div className="site-header-inner">
         <button className="brand" onClick={() => navigate('home')}>
           <span className="brand-mark">A</span>

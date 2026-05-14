@@ -6,6 +6,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { assistantVoicePreviewText, normalizeAssistantTtsVoice } from '@mobile/src/lib/assistantTtsVoice';
+import { clearAssistantMediaPlaybackHint, prepareAssistantMediaPlayback, preferBuiltInSpeakerSinkIfSupported, preferEncodedAudioViaMediaElementFirst } from './mediaPlaybackRoute';
+import { getInterviewAudioContext } from './voiceInterviewSounds';
 
 /** Minimal typings — TS `dom` lib may omit experimental SpeechRecognition. */
 type WebSpeechRecognition = {
@@ -47,6 +49,8 @@ type WebSpeechRecognitionErrorEvent = {
 
 let neuralAudio: HTMLAudioElement | null = null;
 let neuralObjectUrl: string | null = null;
+/** Neural TTS via Web Audio (works after async once `AudioContext.resume()` ran from the session-start tap). */
+let neuralBufferSource: AudioBufferSourceNode | null = null;
 
 /** Tiny silent WAV — used only to satisfy mobile autoplay / “user gesture” policies for `<audio>`. */
 const SILENT_WAV_DATA_URL =
@@ -58,14 +62,36 @@ let speakGen = 0;
 /** Resolves the in-flight `playMp3Base64` promise when audio is stopped early (mic / user cancel). */
 let pendingNeuralComplete: (() => void) | null = null;
 
+function stopNeuralBufferSource(): void {
+  if (!neuralBufferSource) return;
+  try {
+    neuralBufferSource.onended = null;
+    neuralBufferSource.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    neuralBufferSource.stop(0);
+  } catch {
+    /* already stopped */
+  }
+  neuralBufferSource = null;
+}
+
 function neuralCleanup(): void {
   if (typeof window === 'undefined') return;
+  stopNeuralBufferSource();
   if (neuralAudio) {
-    neuralAudio.pause();
-    neuralAudio.onended = null;
-    neuralAudio.onerror = null;
-    neuralAudio.removeAttribute('src');
-    neuralAudio.load();
+    try {
+      neuralAudio.pause();
+      neuralAudio.onended = null;
+      neuralAudio.onerror = null;
+      neuralAudio.removeAttribute('src');
+      neuralAudio.load();
+      neuralAudio.remove();
+    } catch {
+      /* ignore */
+    }
     neuralAudio = null;
   }
   if (neuralObjectUrl) {
@@ -140,10 +166,10 @@ export function cancelAllSpeech(): void {
 }
 
 /**
- * Mobile browsers (especially iOS Safari) block `HTMLAudioElement.play()` and may leave
- * `speechSynthesis` paused until media is touched from a real tap. Voice interviews start
- * TTS only after async network work, which breaks the gesture chain — call this **synchronously**
- * from the same click that opens the voice interview, before `setState` / `await`.
+ * Primes browser speech fallback and optional `<audio>` unlock. Neural TTS prefers **Web Audio**
+ * (`getInterviewAudioContext` + `decodeAudioData`) so the AI can speak after async work without
+ * extra taps — still call `primeInterviewSoundContextFromUserGesture()` from the same tap that
+ * starts the voice session.
  */
 export function primeVoiceInterviewPlaybackFromUserGesture(): void {
   if (typeof window === 'undefined') return;
@@ -190,25 +216,68 @@ export async function previewInterviewTtsVoice(
   await playMp3Base64(data.audioBase64);
 }
 
-function playMp3Base64(b64: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined') {
-      resolve();
-      return;
-    }
-    cancelNeuralSpeech();
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'audio/mpeg' });
-    const url = URL.createObjectURL(blob);
-    neuralObjectUrl = url;
-    const audio = new Audio();
-    audio.setAttribute('playsinline', 'true');
-    audio.setAttribute('webkit-playsinline', 'true');
-    neuralAudio = audio;
-    audio.src = url;
+async function resumeInterviewAudioContext(ctx: AudioContext): Promise<boolean> {
+  if (ctx.state === 'closed') return false;
+  if (ctx.state === 'running') return true;
+  try {
+    await ctx.resume();
+  } catch {
+    return false;
+  }
+  return (ctx.state as string) === 'running';
+}
 
+function playDecodedMp3Buffer(ctx: AudioContext, buffer: AudioBuffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const complete = () => {
+      if (settled) return;
+      settled = true;
+      pendingNeuralComplete = null;
+      neuralCleanup();
+      resolve();
+    };
+
+    const src = ctx.createBufferSource();
+    neuralBufferSource = src;
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    pendingNeuralComplete = complete;
+    src.onended = () => {
+      pendingNeuralComplete = null;
+      neuralBufferSource = null;
+      complete();
+    };
+    try {
+      src.start(0);
+    } catch (e) {
+      pendingNeuralComplete = null;
+      stopNeuralBufferSource();
+      reject(e instanceof Error ? e : new Error('Could not start neural audio'));
+    }
+  });
+}
+
+async function playMp3Base64HtmlAudio(bytes: Uint8Array): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const blob = new Blob([new Uint8Array(bytes)], { type: 'audio/mpeg' });
+  const url = URL.createObjectURL(blob);
+  neuralObjectUrl = url;
+  const audio = new Audio();
+  audio.className = 'interview-neural-audio-out';
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.appendChild(audio);
+  }
+  neuralAudio = audio;
+  audio.src = url;
+  prepareAssistantMediaPlayback(audio);
+  try {
+    await preferBuiltInSpeakerSinkIfSupported(audio);
+  } catch {
+    /* ignore */
+  }
+
+  await new Promise<void>((resolve, reject) => {
     let settled = false;
     const complete = () => {
       if (settled) return;
@@ -233,6 +302,43 @@ function playMp3Base64(b64: string): Promise<void> {
       reject(err instanceof Error ? err : new Error('Could not play audio'));
     });
   });
+}
+
+async function playMp3Base64(b64: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  cancelNeuralSpeech();
+  prepareAssistantMediaPlayback();
+
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  /* On Apple WebKit mobile, `<audio>` blob playback is often classified as media before Web Audio graph output. */
+  if (preferEncodedAudioViaMediaElementFirst()) {
+    try {
+      await playMp3Base64HtmlAudio(bytes);
+      return;
+    } catch {
+      /* fall through to Web Audio */
+    }
+  }
+
+  const ctx = getInterviewAudioContext();
+  if (ctx) {
+    try {
+      const running = await resumeInterviewAudioContext(ctx);
+      if (running) {
+        const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        const audioBuffer = await ctx.decodeAudioData(copy);
+        await playDecodedMp3Buffer(ctx, audioBuffer);
+        return;
+      }
+    } catch {
+      /* fall through to <audio> */
+    }
+  }
+
+  await playMp3Base64HtmlAudio(bytes);
 }
 
 export type SequentialSpeakOptions = {
@@ -276,47 +382,51 @@ export async function speakSequentialHumanLike(
 
   const ttsBody = (segment: string) => (voice ? { text: segment, voice } : { text: segment });
 
-  /** Start fetching the next clip while the current one plays so the following question isn’t blocked on TTS RTT. */
-  let pendingFetch = supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
-    body: ttsBody(cleaned[0]),
-  });
+  try {
+    /** Start fetching the next clip while the current one plays so the following question isn’t blocked on TTS RTT. */
+    let pendingFetch = supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
+      body: ttsBody(cleaned[0]),
+    });
 
-  for (let i = 0; i < cleaned.length; i += 1) {
-    if (speakGen !== myGen) {
-      onComplete?.();
-      return;
+    for (let i = 0; i < cleaned.length; i += 1) {
+      if (speakGen !== myGen) {
+        onComplete?.();
+        return;
+      }
+      const { data, error } = await pendingFetch;
+      if (speakGen !== myGen) {
+        onComplete?.();
+        return;
+      }
+      if (error || !data?.audioBase64) {
+        await speakSequentialAsync(cleaned.slice(i), myGen, pauseBetweenMs);
+        onComplete?.();
+        return;
+      }
+      if (i + 1 < cleaned.length) {
+        pendingFetch = supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
+          body: ttsBody(cleaned[i + 1]),
+        });
+      }
+      try {
+        await playMp3Base64(data.audioBase64);
+      } catch {
+        await speakSequentialAsync(cleaned.slice(i), myGen, pauseBetweenMs);
+        onComplete?.();
+        return;
+      }
+      if (speakGen !== myGen) {
+        onComplete?.();
+        return;
+      }
+      if (i < cleaned.length - 1 && pauseBetweenMs > 0) {
+        await pauseInterruptible(myGen, pauseBetweenMs);
+      }
     }
-    const { data, error } = await pendingFetch;
-    if (speakGen !== myGen) {
-      onComplete?.();
-      return;
-    }
-    if (error || !data?.audioBase64) {
-      await speakSequentialAsync(cleaned.slice(i), myGen, pauseBetweenMs);
-      onComplete?.();
-      return;
-    }
-    if (i + 1 < cleaned.length) {
-      pendingFetch = supabase.functions.invoke<{ audioBase64?: string }>('interview-tts', {
-        body: ttsBody(cleaned[i + 1]),
-      });
-    }
-    try {
-      await playMp3Base64(data.audioBase64);
-    } catch {
-      await speakSequentialAsync(cleaned.slice(i), myGen, pauseBetweenMs);
-      onComplete?.();
-      return;
-    }
-    if (speakGen !== myGen) {
-      onComplete?.();
-      return;
-    }
-    if (i < cleaned.length - 1 && pauseBetweenMs > 0) {
-      await pauseInterruptible(myGen, pauseBetweenMs);
-    }
+    onComplete?.();
+  } finally {
+    clearAssistantMediaPlaybackHint();
   }
-  onComplete?.();
 }
 
 /** Browser-only TTS (robotic vs neural API); uses best available English voice when possible. */

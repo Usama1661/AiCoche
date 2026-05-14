@@ -21,6 +21,15 @@ function getCtx(): AudioContext | null {
 }
 
 /**
+ * Shared graph for interview UI chimes and neural TTS (`voiceWeb` MP3 decode).
+ * Call `primeInterviewSoundContextFromUserGesture()` once from the same tap that starts a voice session
+ * so `resume()` runs in the user-gesture window; decoded buffers can play later without extra taps.
+ */
+export function getInterviewAudioContext(): AudioContext | null {
+  return getCtx();
+}
+
+/**
  * iOS Safari only unlocks Web Audio after `AudioContext.resume()` runs in direct response to a tap.
  * Call synchronously from the same click/touch that navigates into the voice interview (before any `await`).
  */

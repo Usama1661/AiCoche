@@ -37,7 +37,8 @@
 
 @media (max-width: 640px) {
   :root {
-    --site-header-offset: calc(env(safe-area-inset-top, 0px) + 84px);
+    /* Single-row header: brand + actions + menu */
+    --site-header-offset: calc(env(safe-area-inset-top, 0px) + 92px);
   }
 }
 
@@ -729,7 +730,7 @@ textarea.input {
   position: fixed;
   top: max(10px, env(safe-area-inset-top, 0px));
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 0, 0);
   z-index: 40;
   width: min(1220px, calc(100% - 28px));
   max-width: calc(100vw - 28px);
@@ -739,21 +740,27 @@ textarea.input {
   border-radius: 999px;
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(22px);
+  will-change: transform, opacity;
   transition:
     box-shadow 220ms ease,
     background 220ms ease,
-    transform 0.35s cubic-bezier(0.2, 0.82, 0.2, 1);
-  animation: siteHeaderEnter 0.42s cubic-bezier(0.2, 0.82, 0.2, 1) both;
+    transform 0.38s cubic-bezier(0.32, 0.72, 0.2, 1),
+    opacity 0.32s ease;
+  animation: siteHeaderEnter 0.45s ease both;
+}
+
+.site-header.site-header--scroll-hidden {
+  transform: translate3d(-50%, calc(-100% - 18px), 0);
+  opacity: 0;
+  pointer-events: none;
 }
 
 @keyframes siteHeaderEnter {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(-10px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
   }
 }
 
@@ -849,6 +856,17 @@ textarea.input {
 .nav-link.active {
   color: var(--text);
   background: color-mix(in srgb, var(--primary-tint) 88%, var(--elevated));
+}
+
+/* Hidden in-DOM <audio> for neural TTS — improves iOS WebKit media / routing vs detached nodes */
+.interview-neural-audio-out {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .voice-interview-layout {
@@ -4381,20 +4399,78 @@ textarea.input.chat-textarea {
   }
 
   .site-header-inner {
-    min-height: 64px;
-    padding: 10px 14px;
+    min-height: auto;
+    padding: 6px 10px 8px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'brand toolbar menu'
+      'nav nav nav';
     align-items: center;
-    gap: 10px;
+    column-gap: 8px;
+    row-gap: 6px;
   }
 
-  .menu-toggle {
-    display: grid;
+  .site-header-inner .brand {
+    grid-area: brand;
+    min-width: 0;
+    justify-self: start;
+    font-size: 13px;
+    gap: 6px;
   }
 
-  .nav-links {
-    grid-column: 1 / -1;
+  .site-header-inner .brand > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .site-header-inner .brand-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 11px;
+    flex-shrink: 0;
+  }
+
+  .site-header-inner .menu-toggle {
+    grid-area: menu;
+    justify-self: end;
+    width: 38px;
+    height: 38px;
+  }
+
+  .site-header-inner .header-actions {
+    grid-area: toolbar;
+    width: auto;
+    max-width: min(52vw, 220px);
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .site-header-inner .header-actions .chip {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 0.02em;
+    flex: 0 0 auto;
+  }
+
+  .site-header-inner .header-icon-button {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+    flex: 0 0 auto;
+  }
+
+  .site-header-inner .nav-links {
+    grid-area: nav;
     width: 100%;
     display: none;
     overflow: visible;
@@ -4405,7 +4481,7 @@ textarea.input.chat-textarea {
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
   }
 
-  .nav-links.open {
+  .site-header-inner .nav-links.open {
     display: grid;
     gap: 6px;
   }
@@ -4417,23 +4493,8 @@ textarea.input.chat-textarea {
     border-radius: 12px;
   }
 
-  .header-actions {
-    grid-column: 1 / -1;
-    width: 100%;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .header-actions .chip:last-child {
-    max-width: 100%;
-  }
-
-  .header-actions .chip:first-child {
-    min-width: 0;
-    max-width: min(70vw, 420px);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .menu-toggle {
+    display: grid;
   }
 
   .hero-panel {
