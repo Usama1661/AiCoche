@@ -1302,6 +1302,21 @@ export default function WebApp() {
     setView('login');
   }
 
+  const isShellView =
+    Boolean(user) &&
+    profile.onboardingComplete &&
+    view !== 'splash' &&
+    view !== 'login' &&
+    view !== 'signup' &&
+    view !== 'onboarding';
+
+  useEffect(() => {
+    if (!hydrated || !user || !profile.onboardingComplete) return;
+    if (view === 'login' || view === 'signup') {
+      setView('home');
+    }
+  }, [hydrated, user, profile.onboardingComplete, view]);
+
   const common = {
     user,
     setUser,
@@ -1351,7 +1366,7 @@ export default function WebApp() {
       {view === 'signup' ? <Auth mode="signup" {...common} /> : null}
       {view === 'onboarding' ? <Onboarding user={user} profile={profile} setProfile={setProfile} setView={setView} setError={setError} /> : null}
 
-      {user && profile.onboardingComplete ? (
+      {isShellView ? (
         <>
           <WebHeader
             active={headerActiveTab(view)}
@@ -1362,30 +1377,32 @@ export default function WebApp() {
             onSignOut={signOut}
             cvAnalyzed={hasCvAnalysisMetrics(metrics)}
           />
-          {view === 'home' ? <Home {...common} /> : null}
-          {view === 'interview' ? <InterviewTab {...common} /> : null}
-          {view === 'quiz' ? <Quiz {...common} /> : null}
-          {view === 'profile' ? <Profile {...common} onSignOut={signOut} /> : null}
-          {view === 'settings' ? (
-            <Settings
-              user={user}
-              theme={theme}
-              setTheme={setTheme}
-              onSignOut={signOut}
-              setView={setView}
-              assistantTtsVoice={assistantTtsVoice}
-              setAssistantTtsVoice={setAssistantTtsVoice}
-            />
-          ) : null}
-          {view === 'cv-upload' ? <CvUpload {...common} /> : null}
-          {view === 'cv-analysis' ? <CvAnalysisScreen {...common} /> : null}
-          {view === 'professional-profile' ? <ProfessionalProfileScreen {...common} /> : null}
-          {view === 'interview-session' ? <InterviewSession {...common} /> : null}
-          {view === 'voice-interview' ? <VoiceInterviewSession {...common} /> : null}
-          {view === 'interview-history' ? <InterviewHistorySession {...common} /> : null}
-          {view === 'privacy-security' ? <InfoPage title="Privacy & Security" setView={setView} /> : null}
-          {view === 'privacy-policy' ? <InfoPage title="Privacy Policy" setView={setView} /> : null}
-          {view === 'help-support' ? <InfoPage title="Help & Support" setView={setView} /> : null}
+          <div className="app-main">
+            {view === 'home' ? <Home {...common} /> : null}
+            {view === 'interview' ? <InterviewTab {...common} /> : null}
+            {view === 'quiz' ? <Quiz {...common} /> : null}
+            {view === 'profile' ? <Profile {...common} onSignOut={signOut} /> : null}
+            {view === 'settings' ? (
+              <Settings
+                user={user}
+                theme={theme}
+                setTheme={setTheme}
+                onSignOut={signOut}
+                setView={setView}
+                assistantTtsVoice={assistantTtsVoice}
+                setAssistantTtsVoice={setAssistantTtsVoice}
+              />
+            ) : null}
+            {view === 'cv-upload' ? <CvUpload {...common} /> : null}
+            {view === 'cv-analysis' ? <CvAnalysisScreen {...common} /> : null}
+            {view === 'professional-profile' ? <ProfessionalProfileScreen {...common} /> : null}
+            {view === 'interview-session' ? <InterviewSession {...common} /> : null}
+            {view === 'voice-interview' ? <VoiceInterviewSession {...common} /> : null}
+            {view === 'interview-history' ? <InterviewHistorySession {...common} /> : null}
+            {view === 'privacy-security' ? <InfoPage title="Privacy & Security" setView={setView} /> : null}
+            {view === 'privacy-policy' ? <InfoPage title="Privacy Policy" setView={setView} /> : null}
+            {view === 'help-support' ? <InfoPage title="Help & Support" setView={setView} /> : null}
+          </div>
         </>
       ) : null}
     </main>
@@ -1516,9 +1533,24 @@ function Auth({ mode, setUser, setProfile, setView, setBusy, setError, busy }: C
           {mode === 'login' ? 'Sign in to continue your career journey' : 'Start your career growth journey today'}
         </p>
       </div>
-      {mode === 'signup' ? <Field label="Full Name" value={name} onChange={setName} placeholder="John Doe" /> : null}
-      <Field label="Email" value={email} onChange={setEmail} placeholder="you@example.com" type="email" />
-      <Field label="Password" value={password} onChange={setPassword} placeholder="Min. 6 characters" type="password" />
+      {mode === 'signup' ? <Field label="Full Name" value={name} onChange={setName} placeholder="John Doe" autoComplete="name" /> : null}
+      <Field
+        label="Email"
+        value={email}
+        onChange={setEmail}
+        placeholder="you@example.com"
+        type="email"
+        autoComplete="email"
+        inputMode="email"
+      />
+      <Field
+        label="Password"
+        value={password}
+        onChange={setPassword}
+        placeholder="Min. 6 characters"
+        type="password"
+        autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+      />
       <Button onClick={submit} disabled={!valid || busy}>{busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}</Button>
       <div className="row auth-switch">
         <p className="body muted">{mode === 'login' ? "Don't have an account?" : 'Already have an account?'}</p>
@@ -6088,11 +6120,41 @@ function Button({
   );
 }
 
-function Field({ label, value, onChange, placeholder, type = 'text', multiline }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: string; multiline?: boolean }) {
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+  multiline,
+  autoComplete,
+  inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: string;
+  multiline?: boolean;
+  autoComplete?: string;
+  inputMode?: 'text' | 'email' | 'search' | 'numeric' | 'tel' | 'url' | 'none' | 'decimal' | undefined;
+}) {
   return (
     <label className="input-group">
       <span className="label">{label}</span>
-      {multiline ? <textarea className="input" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} /> : <input className="input" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} type={type} />}
+      {multiline ? (
+        <textarea className="input" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      ) : (
+        <input
+          className="input"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          type={type}
+          autoComplete={autoComplete}
+          inputMode={inputMode}
+        />
+      )}
     </label>
   );
 }

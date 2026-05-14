@@ -10,6 +10,8 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
+  /** Lets the page reflow when the mobile keyboard opens so inputs stay reachable (Chrome / supporting browsers). */
+  interactiveWidget: 'resizes-content',
   themeColor: '#0A0A14',
 };
 
